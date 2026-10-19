@@ -49,6 +49,40 @@ class BpmnParserTest {
     }
 
     @Test
+    void readsExpectedHardwareRetailerCounts() throws IOException {
+        BpmnProcess process = parser.parse(Path.of("bpmn", "HardwareRetailer.bpmn"), "_6-1");
+
+        assertEquals("_6-1", process.getId());
+        assertEquals("", process.getName());
+        assertEquals(16, process.getNodes().size());
+        assertEquals(8, count(process, NodeType.TASK));
+        assertEquals(8, process.getNodes().values().stream()
+                .filter(node -> node.getType().isTask()).count());
+        assertEquals(2, count(process, NodeType.EXCLUSIVE_GATEWAY));
+        assertEquals(2, count(process, NodeType.PARALLEL_GATEWAY));
+        assertEquals(2, count(process, NodeType.INCLUSIVE_GATEWAY));
+        assertEquals(6, process.getNodes().values().stream()
+                .filter(node -> node.getType().isGateway()).count());
+        assertEquals(1, count(process, NodeType.START_EVENT));
+        assertEquals(1, count(process, NodeType.END_EVENT));
+        assertEquals(18, process.getSequenceFlows().size());
+    }
+
+    @Test
+    void readsHardwareRetailerNamesAndFlowsWithoutIncludingAnnotations() throws IOException {
+        BpmnProcess process = parser.parse(Path.of("bpmn", "HardwareRetailer.bpmn"), "_6-1");
+        SequenceFlow flow = findFlow(process, "_6-639");
+
+        assertEquals("_6-204", flow.getSourceRef());
+        assertEquals("_6-226", flow.getTargetRef());
+        assertEquals("Special Carrier", flow.getName());
+        assertEquals("", flow.getCondition());
+        assertEquals("Assign a carrier & prepare paperwork", process.getNodes().get("_6-277").getName());
+        assertFalse(process.getNodes().containsKey("_6-670"));
+        assertFalse(process.getSequenceFlows().stream().anyMatch(item -> item.getId().equals("_6-673")));
+    }
+
+    @Test
     void readsKnownConnectionAndKeepsNodesWithTheSameName() throws IOException {
         BpmnProcess process = parser.parse(APPLICATION, PROCESS_ID);
         SequenceFlow flow = findFlow(process, "_5-_6");

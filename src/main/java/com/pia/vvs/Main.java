@@ -14,14 +14,21 @@ import java.util.List;
 
 public class Main {
     public static void main(String[] args) {
-        Path file = Path.of("bpmn", "ApplicationProcess.bpmn");
+        if ((args.length != 0 && args.length != 2)
+                || (args.length == 2 && (args[0].isBlank() || args[1].isBlank()))) {
+            System.err.println("Indica ambos argumentos (ruta e ID del proceso) o ninguno; no pueden estar vacíos.");
+            System.err.println("Uso: java -cp target/classes com.pia.vvs.Main [archivo.bpmn procesoId]");
+            System.exit(1);
+        }
         try {
-            BpmnProcess process = new BpmnParser().parse(file, "gov.medicaid.process.application");
-            printResults(file, process);
+            Path file = args.length == 0 ? Path.of("bpmn", "ApplicationProcess.bpmn") : Path.of(args[0]);
+            String processId = args.length == 0 ? "gov.medicaid.process.application" : args[1];
+            BpmnProcess process = new BpmnParser().parse(file, processId);
             ProcessGraph graph = new ProcessGraph(process);
+            printResults(file, process);
             printGraph(graph);
-        } catch (IOException exception) {
-            System.err.println("No se pudo leer el proceso BPMN: " + exception.getMessage());
+        } catch (IOException | IllegalArgumentException exception) {
+            System.err.println("No se pudo analizar el BPMN: " + exception.getMessage());
             System.exit(1);
         }
     }
@@ -32,7 +39,7 @@ public class Main {
         System.out.println("BPMN FLOW ANALYZER");
         System.out.println("====================================\n");
         System.out.println("Archivo: " + file.getFileName());
-        System.out.println("Proceso: " + process.getName());
+        System.out.println("Proceso: " + (process.getName().isBlank() ? process.getId() : process.getName()));
         System.out.println("ID del proceso: " + process.getId());
         System.out.println();
         System.out.println("Tareas encontradas: "
@@ -74,12 +81,10 @@ public class Main {
         System.out.println("Eventos iniciales: " + graph.getStartEvents().size());
         System.out.println("Eventos finales: " + graph.getEndEvents().size());
 
-        for (String nodeId : List.of("_1", "_5", "_7", "_35", "_33")) {
-            BpmnNode node = graph.getNode(nodeId);
-            List<SequenceFlow> incoming = graph.getIncomingFlows(nodeId);
-            List<SequenceFlow> outgoing = graph.getOutgoingFlows(nodeId);
-            System.out.println("\nNodo: " + node.getId() + " | " + node.getName());
-            System.out.println("Tipo: " + node.getType());
+        for (BpmnNode node : graph.getProcess().getNodes().values()) {
+            List<SequenceFlow> incoming = graph.getIncomingFlows(node.getId());
+            List<SequenceFlow> outgoing = graph.getOutgoingFlows(node.getId());
+            System.out.println("\nNodo: " + node.getId());
             System.out.println("Entradas: " + incoming.size() + " "
                     + incoming.stream().map(SequenceFlow::getId).toList());
             System.out.println("Salidas: " + outgoing.size() + " "

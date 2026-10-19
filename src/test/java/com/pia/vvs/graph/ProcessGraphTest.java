@@ -65,6 +65,27 @@ class ProcessGraphTest {
     }
 
     @Test
+    void buildsHardwareRetailerGraphWithItsOwnNodeIds() throws IOException {
+        BpmnProcess process = new BpmnParser().parse(Path.of("bpmn", "HardwareRetailer.bpmn"), "_6-1");
+        ProcessGraph graph = new ProcessGraph(process);
+
+        assertEquals(16, graph.getProcess().getNodes().size());
+        assertEquals(18, graph.getProcess().getSequenceFlows().size());
+        assertEquals(List.of("_6-67"), graph.getStartEvents().stream().map(BpmnNode::getId).toList());
+        assertEquals(List.of("_6-620"), graph.getEndEvents().stream().map(BpmnNode::getId).toList());
+        assertEquals(List.of("_6-635", "_6-667"),
+                graph.getOutgoingFlows("_6-80").stream().map(SequenceFlow::getId).toList());
+        assertEquals(List.of("_6-659", "_6-661"),
+                graph.getIncomingFlows("_6-547").stream().map(SequenceFlow::getId).toList());
+        assertTrue(graph.getIncomingFlows("_6-67").isEmpty());
+        assertTrue(graph.getOutgoingFlows("_6-620").isEmpty());
+        for (SequenceFlow flow : process.getSequenceFlows()) {
+            assertTrue(graph.getOutgoingFlows(flow.getSourceRef()).contains(flow));
+            assertTrue(graph.getIncomingFlows(flow.getTargetRef()).contains(flow));
+        }
+    }
+
+    @Test
     void resolvesSourceAndTargetAndPreservesCompleteFlow() throws IOException {
         BpmnProcess process = readApplication();
         ProcessGraph graph = new ProcessGraph(process);
