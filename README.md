@@ -98,8 +98,7 @@ Para ejecutarlas:
 mvn test
 ```
 
-Actualmente se cuenta con 47 pruebas unitarias para verificar la lectura
-de archivos BPMN, construcción del grafo y manejo de errores.
+Actualmente se cuenta con 47 pruebas unitarias.
 
 ## Estado del proyecto
 
@@ -107,6 +106,3 @@ de archivos BPMN, construcción del grafo y manejo de errores.
 - **Etapa 2:** construcción del grafo de conexiones. Completada.
 - **Etapa 3:** análisis de caminos y generación de tablas. Pendiente.
 - **Etapa 4:** generación de escenarios Gherkin y código Cucumber. Pendiente.
-
-Actualmente, el programa analiza la estructura del BPMN, pero todavía
-no determina los posibles caminos de ejecución.
