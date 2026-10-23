@@ -41,6 +41,7 @@ public class BpmnParser {
         Element process = findProcess(document, processId);
         List<BpmnNode> nodes = new ArrayList<>();
         List<SequenceFlow> flows = new ArrayList<>();
+        List<String> unsupportedBehaviors = new ArrayList<>();
         Set<String> ids = new HashSet<>();
         ids.add(processId);
 
@@ -58,6 +59,7 @@ public class BpmnParser {
                 throw new IOException("ID BPMN duplicado en el proceso: " + id);
             }
             if (type != null) {
+                readUnsupportedBehaviors(element, unsupportedBehaviors);
                 nodes.add(new BpmnNode(id, element.getAttribute("name"), type));
             } else {
                 flows.add(new SequenceFlow(id, requiredAttribute(element, "sourceRef"),
@@ -66,12 +68,25 @@ public class BpmnParser {
             }
         }
 
-        BpmnProcess result = new BpmnProcess(processId, process.getAttribute("name"), nodes, flows);
+        BpmnProcess result = new BpmnProcess(processId, process.getAttribute("name"), nodes, flows, unsupportedBehaviors);
         for (SequenceFlow flow : flows) {
             validateReference(result, flow, flow.getSourceRef(), "sourceRef");
             validateReference(result, flow, flow.getTargetRef(), "targetRef");
         }
         return result;
+    }
+
+    private void readUnsupportedBehaviors(Element node, List<String> behaviors) {
+        if (node.hasAttribute("default")) {
+            behaviors.add("flujo por defecto en " + node.getAttribute("id"));
+        }
+        for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child instanceof Element element && isBpmnElement(element)
+                    && ("standardLoopCharacteristics".equals(element.getLocalName())
+                    || "multiInstanceLoopCharacteristics".equals(element.getLocalName()))) {
+                behaviors.add(element.getLocalName() + " en " + node.getAttribute("id"));
+            }
+        }
     }
 
     private Document readDocument(Path file) throws IOException {

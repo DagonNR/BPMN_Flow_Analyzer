@@ -4,6 +4,8 @@ import com.pia.vvs.model.BpmnNode;
 import com.pia.vvs.model.BpmnProcess;
 import com.pia.vvs.model.NodeType;
 import com.pia.vvs.model.SequenceFlow;
+import com.pia.vvs.analysis.PathAnalyzer;
+import com.pia.vvs.graph.ProcessGraph;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -104,6 +106,29 @@ class BpmnParserTest {
         assertEquals("success", flow.getName());
         assertEquals("return \"SUCCESS\".equals(model.getProcessResults()"
                 + ".getValidationResult().getStatus().getStatusCode());", flow.getCondition());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "loop", "multiInstance"})
+    void preservesStructuralReadingButRejectsGenerationWithUnsupportedBehavior(String behavior) throws IOException {
+        String xml = Files.readString(APPLICATION);
+        if (behavior.equals("default")) {
+            xml = xml.replace("id=\"_7\" name=\"Reject Or Verify\"", "id=\"_7\" default=\"_7-_34\" name=\"Reject Or Verify\"");
+        } else {
+            String loop = behavior.equals("loop")
+                    ? "<standardLoopCharacteristics testBefore='true'><loopCondition xsi:type='tFormalExpression'>false</loopCondition></standardLoopCharacteristics>"
+                    : "<multiInstanceLoopCharacteristics isSequential='true'/>";
+            xml = xml.replace("<userTask id=\"_3\" name=\"Manual Review\" >",
+                    "<userTask id=\"_3\" name=\"Manual Review\" >" + loop);
+        }
+
+        BpmnProcess process = parser.parse(writeXml(xml), PROCESS_ID);
+
+        assertEquals(19, process.getNodes().size());
+        assertEquals(20, process.getSequenceFlows().size());
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> new PathAnalyzer().analyze(new ProcessGraph(process), 2));
+        assertTrue(error.getMessage().contains("no soportad"));
     }
 
     @ParameterizedTest
