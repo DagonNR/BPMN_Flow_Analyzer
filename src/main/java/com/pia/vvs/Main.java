@@ -12,6 +12,7 @@ import com.pia.vvs.model.NodeType;
 import com.pia.vvs.model.SequenceFlow;
 import com.pia.vvs.parser.BpmnParser;
 import com.pia.vvs.output.FlowTable;
+import com.pia.vvs.output.ExcelExporter;
 import com.pia.vvs.output.GherkinGenerator;
 
 import java.io.IOException;
@@ -46,7 +47,8 @@ public class Main {
 
     private static void validateArguments(String[] args) {
         if (args.length == 1 || args.length > 4) {
-            throw new IllegalArgumentException("Uso: java -cp target/classes com.pia.vvs.Main "
+            throw new IllegalArgumentException("Uso: java -cp \"target/classes" + java.io.File.pathSeparator
+                    + "target/dependency/*\" com.pia.vvs.Main "
                     + "[archivo.bpmn procesoId [directorioSalida [maxRetornos]]]");
         }
         for (String argument : args) {
@@ -74,7 +76,9 @@ public class Main {
         Path csvFile = output.resolve(baseName + ".csv");
         Path branchFile = output.resolve(baseName + "-ramas.csv");
         Path featureFile = output.resolve("ApplicationProcess.feature");
+        Path excelFile = output.resolve(baseName + ".xlsx");
         validateDestination(input, csvFile);
+        validateDestination(input, excelFile);
         if (branchCsv != null) {
             validateDestination(input, branchFile);
         }
@@ -82,6 +86,7 @@ public class Main {
             validateDestination(input, featureFile);
         }
         Files.createDirectories(output);
+        new ExcelExporter().write(excelFile, graph.getProcess(), paths, branches);
         writeResult(csvFile, csv);
         if (branchCsv != null) {
             writeResult(branchFile, branchCsv);
@@ -106,7 +111,7 @@ public class Main {
             System.out.println("La generación Gherkin solo está disponible para ApplicationProcess.");
         }
         System.out.println("Archivos generados:\n" + csvFile + (branchCsv != null ? "\n" + branchFile : "")
-                + (application ? "\n" + featureFile : ""));
+                + "\n" + excelFile + (application ? "\n" + featureFile : ""));
     }
 
     private static void validateDestination(Path input, Path destination) throws IOException {

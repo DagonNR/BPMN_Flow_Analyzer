@@ -19,6 +19,10 @@ public class FlowTable {
 
     /** Cada fila es una proyección, nunca una declaración de ejecución completa independiente. */
     public String branchesToCsv(BpmnProcess process, List<BranchFlow> branches) {
+        return csv(branchRows(process, branches));
+    }
+
+    List<List<String>> branchRows(BpmnProcess process, List<BranchFlow> branches) {
         List<BpmnNode> tasks = process.getNodes().values().stream().filter(node -> node.getType().isTask()).toList();
         List<List<String>> rows = new ArrayList<>();
         List<String> header = new ArrayList<>(List.of("Flujo rama", "Representación", "Caminos origen", "Salidas AND elegidas"));
@@ -37,7 +41,7 @@ public class FlowTable {
             }
             rows.add(row);
         }
-        return csv(rows);
+        return rows;
     }
 
     private String csv(List<List<String>> rows) {
@@ -57,7 +61,7 @@ public class FlowTable {
         return text.toString();
     }
 
-    private List<List<String>> rows(BpmnProcess process, List<ProcessPath> paths) {
+    List<List<String>> rows(BpmnProcess process, List<ProcessPath> paths) {
         List<BpmnNode> tasks = process.getNodes().values().stream().filter(node -> node.getType().isTask()).toList();
         List<List<String>> rows = new ArrayList<>();
         List<String> header = new ArrayList<>(List.of("Flujo", "Estado", "Retornos", "Evento final", "Flujo bloqueado"));

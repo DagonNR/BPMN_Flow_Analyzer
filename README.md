@@ -22,6 +22,7 @@ Ambos archivos se encuentran en la carpeta `bpmn/`.
 - Java 17
 - Maven
 - JUnit
+- Apache POI 6.0.0 (`poi-ooxml`, compatible con Java 17)
 - Git y GitHub
 
 ## Funcionalidades
@@ -39,11 +40,11 @@ Ambos archivos se encuentran en la carpeta `bpmn/`.
 - Registro de ramas activadas conjuntamente, sin enumerar sus permutaciones temporales.
 - Tablas de tareas en consola y CSV para ambos modelos.
 - CSV adicional de flujos por ramas AND, con trazabilidad a los caminos completos.
+- Excel nativo con hojas `Caminos` y `Ramas`, generado directamente en Java.
 - Escenarios Gherkin para ApplicationProcess.
 
 **Pendientes:**
 
-- Exportación nativa de tablas a Excel (`.xlsx`).
 - Generación de escenarios Gherkin para Hardware Retailer.
 - Generación de código Java inicial para Cucumber.
 
@@ -57,42 +58,78 @@ Desde la raíz del proyecto, compilar con:
 mvn package
 ```
 
+Maven copia las dependencias de ejecución a `target/dependency`. Los siguientes
+comandos usan el separador `;` de Windows. En Linux/macOS se debe sustituir por `:`.
+No se requiere Microsoft Excel instalado para generar los libros.
+Se utiliza el logger sencillo incluido en las dependencias de POI, sin agregar
+una implementación de logging adicional.
+
 **Ejecutar ApplicationProcess (predeterminado):**
 
 ```bash
-java -cp target/classes com.pia.vvs.Main
+java -cp "target/classes;target/dependency/*" com.pia.vvs.Main
 ```
 
 **Ejecutar un BPMN específico:**
 
 ```bash
-java -cp target/classes com.pia.vvs.Main "bpmn/ApplicationProcess.bpmn" "gov.medicaid.process.application"
+java -cp "target/classes;target/dependency/*" com.pia.vvs.Main "bpmn/ApplicationProcess.bpmn" "gov.medicaid.process.application"
 ```
 
 **Ejecutar Hardware Retailer:**
 
 ```bash
-java -cp target/classes com.pia.vvs.Main "bpmn/HardwareRetailer.bpmn" "_6-1"
+java -cp "target/classes;target/dependency/*" com.pia.vvs.Main "bpmn/HardwareRetailer.bpmn" "_6-1"
 ```
 
 El programa recibe cero, dos, tres o cuatro argumentos:
 
 ```text
-java -cp target/classes com.pia.vvs.Main [archivo.bpmn procesoId [directorioSalida [maxRetornos]]]
+java -cp "target/classes;target/dependency/*" com.pia.vvs.Main [archivo.bpmn procesoId [directorioSalida [maxRetornos]]]
 ```
 
 Sin argumentos utiliza ApplicationProcess. El directorio predeterminado es
 `target/generated-tests` y el límite predeterminado es `2` (admite de 0 a 100).
-ApplicationProcess genera `ApplicationProcess.csv`, `ApplicationProcess-ramas.csv`
-y `ApplicationProcess.feature`. Hardware Retailer genera `HardwareRetailer.csv`
-y `HardwareRetailer-ramas.csv`, sin generar Gherkin. Para otros modelos se utiliza
+ApplicationProcess genera `ApplicationProcess.csv`, `ApplicationProcess-ramas.csv`,
+`ApplicationProcess.xlsx` y `ApplicationProcess.feature`. Hardware Retailer genera
+`HardwareRetailer.csv`, `HardwareRetailer-ramas.csv` y `HardwareRetailer.xlsx`,
+sin generar Gherkin. Para otros modelos se utiliza
 el nombre base del archivo de entrada. El CSV sin sufijo conserva los caminos
 conjuntos, incluidos los truncados; el sufijo `-ramas` identifica las proyecciones
 de caminos completos descritas más adelante.
 
 ```bash
-java -cp target/classes com.pia.vvs.Main bpmn/HardwareRetailer.bpmn _6-1 target/hardware 2
+java -cp "target/classes;target/dependency/*" com.pia.vvs.Main bpmn/HardwareRetailer.bpmn _6-1 target/hardware 2
 ```
+
+### Exportación Excel
+
+Cada ejecución genera un `.xlsx` con exactamente dos hojas, a partir de las mismas
+filas utilizadas por los CSV:
+
+- **Caminos:** identificador, estado, retornos, evento final, flujo bloqueado y tareas
+  por nombre e ID con marcas `X`/`-`. `COMPLETE` es un resultado estructural completo;
+  `TRUNCATED` indica que se alcanzó el límite de retornos y no representa un final exitoso.
+- **Ramas:** filas `BRANCH_VIEW`, caminos de origen, salidas AND elegidas y tareas
+  presentes/ausentes. Son proyecciones de caminos completos, no ejecuciones
+  independientes. Excluyen los caminos truncados.
+
+Las hojas tienen encabezados en negritas, filtros, primera fila inmovilizada y anchos
+limitados con ajuste de texto. Los retornos son números; los textos del BPMN son
+celdas de texto, incluso cuando comienzan con `=`, `+`, `-` o `@`. Por eso el XLSX
+conserva el texto original sin el apóstrofo de seguridad que utiliza el CSV.
+Los nombres repetidos se distinguen por su ID.
+
+El libro se escribe y cierra en un archivo temporal antes de reemplazar el destino.
+Si falla la exportación, se informa el error y se conserva el libro anterior, si
+existía. No se sobrescribe el BPMN de entrada. Los formatos se publican por archivo;
+no se garantiza una actualización conjunta de todos ellos si falla una escritura posterior.
+
+Se mantienen las limitaciones del analizador. El exportador trabaja en memoria y
+está destinado a modelos pequeños. Se aplican los límites de XLSX (1.048.576 filas,
+16.384 columnas y 32.767 caracteres por celda); si se superan, la exportación falla
+sin recortar datos. Las celdas muy extensas pueden requerir ampliar manualmente la
+altura de fila para ver todo el texto.
 
 ## Resultados esperados
 
@@ -312,7 +349,9 @@ entradas externas, salidas sin convergencia AND común y caminos que visiten una
 misma bifurcación AND varias veces. Sí conserva ciclos dentro de una rama o en una
 sección secuencial que no repitan la bifurcación. Ante una estructura no soportada,
 Main informa el motivo, genera las salidas conjuntas y no genera ni actualiza el CSV
-por ramas; si ya existía uno, sigue siendo un resultado anterior. No devuelve una
+por ramas; si ya existía uno, sigue siendo un resultado anterior. El Excel conserva
+`Caminos` y muestra en `Ramas` un aviso `NO DISPONIBLE`, sin inventar proyecciones.
+No devuelve una
 vista parcial como si cubriera todos los caminos. El número de proyecciones puede
 crecer con las combinaciones de regiones paralelas sucesivas.
 
@@ -327,7 +366,10 @@ mvn clean test
 mvn package
 ```
 
-Las pruebas cubren parser, grafo, análisis, tablas, Gherkin y ejecuciones de Main.
+Las pruebas cubren parser, grafo, análisis, tablas CSV/Excel, Gherkin y ejecuciones de Main.
+Los XLSX se reabren con Apache POI para comprobar hojas, dimensiones, tipos de celda,
+contenido completo frente al CSV, truncamientos, trazabilidad, texto especial y
+errores de escritura. No se ejecutan fórmulas ni se requiere Excel instalado.
 Incluyen combinaciones OR de una, varias y todas las ramas, convergencias antes de
 las tareas en el orden del XML, OR anidados, condiciones sin evaluar, ciclos,
 inmutabilidad y Hardware Retailer con IDs renombrados. La vista por ramas se prueba

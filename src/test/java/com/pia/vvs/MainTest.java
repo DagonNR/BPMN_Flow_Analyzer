@@ -1,9 +1,11 @@
 package com.pia.vvs;
 
+import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -29,6 +31,12 @@ class MainTest {
         assertTrue(result.output().contains("Flujos por ramas (BRANCH_VIEW): 7"));
         assertEquals(8, Files.readString(Path.of("target/generated-tests/ApplicationProcess-ramas.csv")).lines().count());
         assertTrue(Files.isRegularFile(Path.of("target/generated-tests/ApplicationProcess.csv")));
+        try (var stream = Files.newInputStream(Path.of("target/generated-tests/ApplicationProcess.xlsx"));
+             var workbook = new XSSFWorkbook(stream)) {
+            assertEquals(2, workbook.getNumberOfSheets());
+            assertEquals(9, workbook.getSheet("Caminos").getPhysicalNumberOfRows());
+            assertEquals(8, workbook.getSheet("Ramas").getPhysicalNumberOfRows());
+        }
         String feature = Files.readString(Path.of("target/generated-tests/ApplicationProcess.feature"));
         assertEquals(7, feature.lines().filter(line -> line.strip().startsWith("Escenario:")).count());
     }
@@ -72,9 +80,36 @@ class MainTest {
         assertEquals(5, Files.readString(output.resolve("HardwareRetailer.csv")).lines().count());
         assertEquals(6, Files.readString(output.resolve("HardwareRetailer-ramas.csv")).lines().count());
         try (var files = Files.list(output)) {
-            assertEquals(List.of("HardwareRetailer-ramas.csv", "HardwareRetailer.csv"),
+            assertEquals(List.of("HardwareRetailer-ramas.csv", "HardwareRetailer.csv", "HardwareRetailer.xlsx"),
                     files.map(path -> path.getFileName().toString()).sorted().toList());
         }
+    }
+
+    @Test
+    void validatesExcelDestinationBeforeWritingAnyResults() throws Exception {
+        Path output = Files.createDirectory(directory.resolve("output"));
+        Files.createDirectory(output.resolve("ApplicationProcess.xlsx"));
+
+        Execution result = run(APPLICATION, APPLICATION_ID, output.toString());
+
+        assertEquals(1, result.exitCode(), result.output());
+        assertTrue(result.output().contains("La salida no es un archivo regular"));
+        assertFalse(Files.exists(output.resolve("ApplicationProcess.csv")));
+        assertFalse(Files.exists(output.resolve("ApplicationProcess-ramas.csv")));
+        assertFalse(Files.exists(output.resolve("ApplicationProcess.feature")));
+    }
+
+    @Test
+    void neverOverwritesAnInputNamedLikeTheExcelOutput() throws Exception {
+        String xml = Files.readString(Path.of(APPLICATION));
+        Path input = Files.writeString(directory.resolve("ApplicationProcess.xlsx"), xml);
+
+        Execution result = run(input.toString(), APPLICATION_ID, directory.toString());
+
+        assertEquals(1, result.exitCode(), result.output());
+        assertTrue(result.output().contains("no puede sobrescribir el BPMN de entrada"));
+        assertEquals(xml, Files.readString(input));
+        assertFalse(Files.exists(directory.resolve("ApplicationProcess.csv")));
     }
 
     @Test
@@ -126,6 +161,14 @@ class MainTest {
         assertFalse(result.output().contains("Flujos por ramas (BRANCH_VIEW):"));
         assertEquals(2, Files.readString(output.resolve("unpaired.csv")).lines().count());
         assertEquals("resultado anterior", Files.readString(previousBranchFile));
+        try (var stream = Files.newInputStream(output.resolve("unpaired.xlsx"));
+             var workbook = new XSSFWorkbook(stream)) {
+            assertEquals(2, workbook.getNumberOfSheets());
+            assertEquals(2, workbook.getSheet("Caminos").getPhysicalNumberOfRows());
+            var branches = workbook.getSheet("Ramas");
+            assertEquals(2, branches.getPhysicalNumberOfRows());
+            assertTrue(branches.getRow(1).getCell(0).getStringCellValue().startsWith("NO DISPONIBLE:"));
+        }
         assertFalse(result.output().substring(result.output().indexOf("Archivos generados:")).contains("unpaired-ramas.csv"));
     }
 
@@ -197,7 +240,8 @@ class MainTest {
         List<String> command = new ArrayList<>(List.of(
                 Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                 "-Dfile.encoding=UTF-8", "-Dstdout.encoding=UTF-8", "-Dstderr.encoding=UTF-8",
-                "-cp", Path.of("target/classes").toAbsolutePath().toString(),
+                "-cp", Path.of("target/classes").toAbsolutePath() + File.pathSeparator
+                        + Path.of("target/dependency").toAbsolutePath() + File.separator + "*",
                 "com.pia.vvs.Main"));
         command.addAll(List.of(args));
         Path log = Files.createTempFile(directory, "execution-", ".log");
