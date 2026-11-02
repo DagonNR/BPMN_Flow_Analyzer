@@ -8,6 +8,10 @@ import com.pia.vvs.model.SequenceFlow;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Regla de dominio aislada: tras validar el modelo conocido, SUCCESS activa DMF y
+ * OIG juntos; FAILURE activa el rechazo. No es un evaluador general de expresiones.
+ */
 public class ApplicationProcessRules {
     public static final String PROCESS_ID = "gov.medicaid.process.application";
 

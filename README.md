@@ -5,7 +5,7 @@ Proyecto desarrollado para la materia de Verificación y Validación de Software
 ## Objetivo
 
 Desarrollar una herramienta en Java que permita analizar modelos BPMN,
-identificar sus posibles flujos de ejecución y generar casos de prueba,
+identificar caminos estructurales y generar candidatos a casos de prueba,
 tomando como referencia el procedimiento propuesto por De Moura (2017).
 
 ## Modelos BPMN
@@ -35,13 +35,16 @@ Ambos archivos se encuentran en la carpeta `bpmn/`.
 - Consulta de conexiones entrantes y salientes.
 - Selección del archivo BPMN y proceso mediante argumentos.
 - Validación de archivos, identificadores y referencias.
+- Análisis de caminos con XOR, OR y AND, sincronización y límite de retornos.
+- Registro de ramas activadas conjuntamente, sin enumerar sus permutaciones temporales.
+- Tablas de tareas en consola y CSV para ambos modelos.
+- CSV adicional de flujos por ramas AND, con trazabilidad a los caminos completos.
+- Escenarios Gherkin para ApplicationProcess.
 
 **Pendientes:**
 
-- Identificación de caminos de ejecución.
-- Manejo de decisiones y ciclos.
-- Generación de tablas de flujos en Excel.
-- Generación de escenarios Gherkin.
+- Exportación nativa de tablas a Excel (`.xlsx`).
+- Generación de escenarios Gherkin para Hardware Retailer.
 - Generación de código Java inicial para Cucumber.
 
 ## Ejecución
@@ -72,8 +75,24 @@ java -cp target/classes com.pia.vvs.Main "bpmn/ApplicationProcess.bpmn" "gov.med
 java -cp target/classes com.pia.vvs.Main "bpmn/HardwareRetailer.bpmn" "_6-1"
 ```
 
-El programa recibe dos argumentos: la ruta del archivo BPMN y el ID del proceso.
-Si no se proporcionan argumentos, utiliza ApplicationProcess.
+El programa recibe cero, dos, tres o cuatro argumentos:
+
+```text
+java -cp target/classes com.pia.vvs.Main [archivo.bpmn procesoId [directorioSalida [maxRetornos]]]
+```
+
+Sin argumentos utiliza ApplicationProcess. El directorio predeterminado es
+`target/generated-tests` y el límite predeterminado es `2` (admite de 0 a 100).
+ApplicationProcess genera `ApplicationProcess.csv`, `ApplicationProcess-ramas.csv`
+y `ApplicationProcess.feature`. Hardware Retailer genera `HardwareRetailer.csv`
+y `HardwareRetailer-ramas.csv`, sin generar Gherkin. Para otros modelos se utiliza
+el nombre base del archivo de entrada. El CSV sin sufijo conserva los caminos
+conjuntos, incluidos los truncados; el sufijo `-ramas` identifica las proyecciones
+de caminos completos descritas más adelante.
+
+```bash
+java -cp target/classes com.pia.vvs.Main bpmn/HardwareRetailer.bpmn _6-1 target/hardware 2
+```
 
 ## Resultados esperados
 
@@ -86,7 +105,216 @@ Si no se proporcionan argumentos, utiliza ApplicationProcess.
 | Sequence Flows | 20 | 18 |
 | Total de nodos | 19 | 16 |
 
-El programa muestra los elementos identificados y sus conexiones en consola.
+El programa muestra los elementos, conexiones, tabla y conteos en consola.
+
+| Modelo | Límite | Completos | Truncados | Filas por ramas | Escenarios Gherkin |
+|---|---:|---:|---:|---:|---:|
+| ApplicationProcess | 0 | 3 | 1 | 3 | 3 |
+| ApplicationProcess | 1 | 5 | 1 | 5 | 5 |
+| ApplicationProcess | 2 | 7 | 1 | 7 | 7 |
+| Hardware Retailer | 2 | 4 | 0 | 5 | No implementados |
+
+## Contrato del análisis de caminos
+
+Un `ProcessPath` es un resultado **estructural**, no una ejecución cuya viabilidad
+de negocio se haya demostrado. Conserva los nodos procesados, los `sequenceFlow`
+originales (ID, extremos, nombre y condición), los retornos y las ramas concurrentes.
+
+- `COMPLETE`: alcanza un evento final y no quedan tokens pendientes de procesar o sincronizar.
+- `TRUNCATED`: se intentó superar el límite de una arista de retorno. Conserva el
+  `blockedFlow`, que no se añade a los flujos recorridos. No equivale a un final exitoso.
+- XOR divergente: una salida por alternativa. XOR convergente: consume una entrada
+  disponible sin esperar las demás.
+- OR divergente: enumera los `2^n - 1` subconjuntos no vacíos de sus salidas, sin
+  declararlos factibles. OR convergente: requiere una entrada disponible y espera
+  mientras algún token activo pueda alcanzar una entrada vacía sin atravesar la propia
+  convergencia. Cuando se habilita, consume una unidad de cada entrada marcada.
+  No depende de nombres, IDs ni de una pareja de gateways identificada manualmente.
+- AND divergente: activa todas las salidas. AND convergente: exige una unidad en cada
+  entrada antes de continuar. Una compuerta con varias entradas y salidas sincroniza primero.
+- La concurrencia se representa mediante tokens, sin hilos. `getConcurrentBranches()`
+  devuelve grupos inmutables de salidas activadas juntas, uno por ocurrencia de una
+  bifurcación con varias ramas seleccionadas. Permite reconocer su origen y consultar
+  el tipo de gateway en el grafo; no contiene una proyección completa por rama.
+- `getNodes()` es una linealización determinista según el orden de nodos del modelo.
+  Dos nodos consecutivos pueden pertenecer a ramas diferentes y no tener una arista
+  entre sí. **No se inventan conexiones**: las conexiones están en `getFlows()`.
+  No se enumeran todos los órdenes temporales de tareas concurrentes.
+- La tabla conserva una fila por resultado conjunto y marca presencia de tareas con
+  `X`. No expresa orden ni número de visitas; esos datos permanecen en `ProcessPath`.
+  Con varios eventos finales visitados, la columna «Evento final» muestra el último
+  procesado, no necesariamente el único.
+
+Las condiciones se conservan como texto: no se ejecutan Java, scripts, servicios ni
+reglas de datos. Incluso una condición literal `false` puede aparecer en un camino
+estructural completo. Tampoco se interpreta un nombre como `Always` como expresión.
+Una ejecución válida requeriría comprobar condiciones, datos y semántica adicional.
+
+### Vista de flujos por ramas
+
+`BranchFlowProjector` recibe el grafo y los resultados de `PathAnalyzer`. Para cada
+camino completo, localiza bifurcaciones AND y una convergencia AND común: las regiones
+de sus salidas deben ser disjuntas, sin entradas externas y sin llegar a un final
+antes de la convergencia. Conserva una rama por proyección, junto con el prefijo
+común, la convergencia y la continuación. Los nodos y flujos se filtran del camino
+original; no se crean conexiones ni se vuelve a ejecutar la sincronización.
+
+Se mantienen las alternativas XOR y las combinaciones OR seleccionadas. Las regiones
+AND anidadas se separan solo si permanecen en la proyección; las sucesivas combinan
+sus elecciones. ApplicationProcess no tiene una bifurcación AND: sus verificaciones
+DMF/OIG nacen de OR y permanecen juntas, aunque luego sincronicen en AND.
+
+Cada `BranchFlow` conserva nodos y flujos con sus repeticiones. Solo se agrupan vistas
+con las mismas secuencias de IDs de nodos **y** conexiones, acumulando sus caminos de
+origen. No se deduplica por las marcas X: distintas vueltas de un ciclo pueden mostrar
+las mismas tareas y aun así representar recorridos diferentes. Los truncados no se
+proyectan y continúan disponibles en el CSV conjunto.
+
+El CSV adicional utiliza las mismas columnas de tareas X/- y estos metadatos:
+
+| Columna | Significado |
+|---|---|
+| Flujo rama | Identificador B1, B2, etc., en orden de primera aparición |
+| Representación | Siempre `BRANCH_VIEW`; no es un estado `COMPLETE` |
+| Caminos origen | F1;F2;… del CSV conjunto, conservando la numeración que incluye truncados |
+| Salidas AND elegidas | IDs de los flujos seleccionados en bifurcaciones AND; vacío si no hay ninguna |
+
+Una fila no afirma que la rama pueda ejecutarse independientemente. El análisis
+conjunto sigue siendo responsable de verificar que las ramas se sincronicen.
+
+### ApplicationProcess y ciclos
+
+`ApplicationProcessRules` conserva la excepción de dominio del modelo conocido:
+en `_7`, SUCCESS activa conjuntamente DMF (`_34`) y OIG (`_10`); FAILURE activa
+solamente el rechazo (`_9`). Se valida la estructura y el texto esperado de las
+condiciones antes de aplicar esta regla. `_35` espera ambas verificaciones.
+La regla evita combinaciones incompatibles con este modelo sin introducir un
+evaluador general ni trasladar IDs específicos al soporte OR de otros procesos.
+
+Los retornos se identifican como aristas hacia un nodo activo durante DFS. Cada
+alternativa tiene contadores independientes por arista; `getReturnCount()` devuelve
+su suma. En ApplicationProcess la arista es `_32-_33`: L=2 permite dos retornos
+adicionales a Manual Review (hasta tres visitas). El intento de un tercer retorno
+queda truncado. En un grafo con varios ciclos, L no es un límite global de vueltas;
+la clasificación DFS depende del orden del grafo. Una activación concurrente se
+comprueba completa antes de modificar el estado si una de sus salidas supera L.
+Si varias combinaciones de una misma bifurcación se bloquean antes de activarse con
+el mismo prefijo y flujo bloqueado, se devuelve un único truncado para ese prefijo.
+
+### Hardware Retailer y comparación metodológica
+
+Los cuatro resultados conjuntos incluyen `Decide if normal post or special shipment`
+(`_6-102`), `Package goods` (`_6-153`) y la tarea final de documentación (`_6-569`).
+Se distinguen por estas tareas adicionales:
+
+| Fila | Tareas adicionales |
+|---|---|
+| F1 | Solicitar cotizaciones (`_6-226`) y asignar transportista (`_6-277`) |
+| F2 | Comprobar necesidad de seguro (`_6-379`) y contratar seguro (`_6-452`) |
+| F3 | Comprobar necesidad de seguro (`_6-379`) y llenar etiqueta postal (`_6-328`) |
+| F4 | Comprobar necesidad de seguro (`_6-379`), contratar seguro (`_6-452`) y llenar etiqueta (`_6-328`) |
+
+El OR `_6-430` produce tres combinaciones estructurales; la ruta XOR de transportista
+añade una cuarta. `_6-503` reúne las ramas OR activas y `_6-547` sincroniza envío
+con empaquetado. La fila F2 no demuestra una ejecución de negocio válida: omite la
+rama cuyo **nombre**, sin `conditionExpression`, es `Always`.
+
+Se revisó directamente el PDF aportado por el usuario: De Moura et al. (2017),
+*Test Case Generation from BPMN Models for Automated Testing of Web-Based BPM
+Applications*. Referencias por página del PDF de siete páginas: II.A (pp. 1-2),
+III.A (p. 3), III.B-C (pp. 3-4), IV y Tabla II (pp. 4-5), Figuras 4-5 (p. 6).
+Esta revisión sustituye la comparación provisional realizada sin acceso al artículo.
+
+III.A describe columnas por tarea y filas por flujo, marcadas con X o guion.
+III.C explica que las ramas paralelas se representan por separado para facilitar
+su visualización y generación de escenarios. La Tabla II contiene estas cinco
+filas, identificadas aquí como R1-R5 según su orden de aparición. Los IDs se
+corresponden por nombre con nuestro BPMN; el artículo no muestra esos IDs.
+
+| Fila del artículo | Tareas presentes, expresadas con nuestros IDs |
+|---|---|
+| R1 | `_6-102`, `_6-226`, `_6-277`, `_6-569` (transportista) |
+| R2 | `_6-102`, `_6-379`, `_6-452`, `_6-569` (solo seguro) |
+| R3 | `_6-102`, `_6-379`, `_6-328`, `_6-569` (solo etiqueta) |
+| R4 | `_6-153`, `_6-569` (empaquetado) |
+| R5 | `_6-102`, `_6-379`, `_6-452`, `_6-328`, `_6-569` (seguro y etiqueta) |
+
+La correspondencia con nuestro CSV fue comprobada por conjuntos de tareas:
+`F1 = R1 ∪ R4`, `F2 = R2 ∪ R4`, `F3 = R3 ∪ R4`, `F4 = R5 ∪ R4`.
+Por tanto, cuatro resultados conjuntos y cinco filas separadas son representaciones
+distintas de estas ramas. La tarea posterior a la convergencia (`_6-569`) aparece
+también en la fila de empaquetado del artículo. Esta igualdad de conjuntos no prueba
+equivalencia de ejecución ni permite tratar cada fila separada como una ejecución
+completa independiente de la sincronización AND.
+
+El artículo también incluye la combinación «solo seguro» en R2. No se modifica
+nuestro tratamiento de `Always`: la coincidencia con esa fila no demuestra viabilidad
+de negocio. II.A define OR como una o varias salidas, pero el texto no especifica
+un algoritmo formal de sincronización OR ni un evaluador de condiciones que podamos
+reproducir o atribuirle.
+
+III.B restringe la generación funcional a tareas realizadas por usuarios. IV explica
+que la división inclusiva no distingue escenarios porque las tareas posteriores no
+son realizadas por el usuario. La Figura 4 muestra tres escenarios: transportista,
+correo postal y empaquetado. En el primero se omite solicitar cotizaciones; en el
+segundo se omiten contratar seguro y llenar etiqueta. Al proyectar R2, R3 y R5 sobre
+las tareas que aparecen en esa figura, las tres filas resultan iguales. R1 y R4
+aportan las otras dos variantes. Esto explica los tres escenarios observados, sin
+afirmar que el artículo detalle un algoritmo general de deduplicación.
+
+Hay una limitación para reproducir automáticamente ese filtro: nuestro XML declara
+las ocho tareas como `semantic:task`, sin `userTask` ni `manualTask`. Haría falta una
+clasificación explícita o un modelo que conserve esos tipos; no conviene inferirlos
+por nombre o inventar reglas basadas en IDs. Gherkin para Hardware sigue pendiente.
+
+Otras diferencias verificadas: III.C trata los subprocesos como una tarea opaca,
+mientras nuestro analizador los rechaza; su delimitador controla repeticiones de un
+`sequenceFlow`, pero no fija L=2 ni describe exactamente nuestro límite sobre aristas
+de retorno DFS. La Tabla I indica tres gateways para Hardware, frente a seis nodos
+gateway en nuestro XML. Contar solo las tres divergencias es una explicación posible,
+no una convención de conteo explicitada por el artículo.
+
+La nueva vista obtiene automáticamente cinco filas a partir del grafo y los cuatro
+caminos completos. En el orden actual del modelo: B1 corresponde a R1, B2 a R4,
+B3 a R2, B4 a R3 y B5 a R5. B2 agrupa el empaquetado de F1-F4; las otras filas
+proceden respectivamente de F1, F2, F3 y F4. La comparación comprueba tareas presentes
+y ausentes, sin depender del orden de las filas ni codificar esa correspondencia
+en producción. Hay pruebas que renombran todos los IDs, igualan los nombres y
+reordenan los nodos. Se mantienen la sincronización y el CSV conjunto originales.
+
+Como referencia auxiliar para el comportamiento de activación y reunión OR se consultó
+la [documentación de Camunda](https://docs.camunda.org/manual/7.24/reference/bpmn20/gateways/inclusive-gateway/).
+El proyecto no reproduce su motor ni sus particularidades de implementación.
+
+### Alcance y limitaciones
+
+Se comprueban ambos modelos incluidos y grafos pequeños con secuencias, XOR, AND,
+OR y combinaciones anidadas. El análisis requiere exactamente un inicio. Rechaza
+tipos no soportados (subprocesos, eventos intermedios, gateways complejos o basados en
+eventos), flujos por defecto y características de bucle señaladas por el parser,
+nodos sin salida y ramificaciones fuera de gateways. Las convergencias OR que
+pertenecen a un ciclo se rechazan explícitamente para no mezclar iteraciones.
+
+La consulta de alcanzabilidad del OR es estructural y conservadora; no resuelve
+viabilidad de datos ni todas las dependencias de grafos no estructurados. Si quedan
+tokens sin poder avanzar, se informa un error de sincronización y el análisis falla
+sin devolver una lista parcial como si fuera completa. No hay diagnóstico por ruta
+de bloqueos ni comprobación completa de soundness BPMN.
+
+Las tareas son nodos opacos y los eventos iniciales/finales se tratan estructuralmente:
+no se ejecutan servicios, mensajes, temporizadores, compensaciones o terminaciones
+especiales. El parser no conserva toda esa semántica para validarla. La enumeración
+OR es exponencial y el límite de retornos no acota el número total de resultados;
+el alcance son modelos pequeños, no un motor BPMN general.
+
+La vista por ramas exige regiones AND estructuradas. Rechaza cruces de ramas,
+entradas externas, salidas sin convergencia AND común y caminos que visiten una
+misma bifurcación AND varias veces. Sí conserva ciclos dentro de una rama o en una
+sección secuencial que no repitan la bifurcación. Ante una estructura no soportada,
+Main informa el motivo, genera las salidas conjuntas y no genera ni actualiza el CSV
+por ramas; si ya existía uno, sigue siendo un resultado anterior. No devuelve una
+vista parcial como si cubriera todos los caminos. El número de proyecciones puede
+crecer con las combinaciones de regiones paralelas sucesivas.
 
 ## Pruebas
 
@@ -95,14 +323,13 @@ Las pruebas unitarias se realizan con JUnit 5 y se encuentran en `src/test/`.
 Para ejecutarlas:
 
 ```bash
-mvn test
+mvn clean test
+mvn package
 ```
 
-Actualmente se cuenta con 47 pruebas unitarias.
-
-## Estado del proyecto
-
-- **Etapa 1:** lectura e identificación de elementos BPMN. Completada.
-- **Etapa 2:** construcción del grafo de conexiones. Completada.
-- **Etapa 3:** análisis de caminos y generación de tablas. Pendiente.
-- **Etapa 4:** generación de escenarios Gherkin y código Cucumber. Pendiente.
+Las pruebas cubren parser, grafo, análisis, tablas, Gherkin y ejecuciones de Main.
+Incluyen combinaciones OR de una, varias y todas las ramas, convergencias antes de
+las tareas en el orden del XML, OR anidados, condiciones sin evaluar, ciclos,
+inmutabilidad y Hardware Retailer con IDs renombrados. La vista por ramas se prueba
+con regiones simples, anidadas, sucesivas y mixtas, alternativas, ciclos internos,
+trazabilidad y la correspondencia con las cinco filas de la Tabla II.

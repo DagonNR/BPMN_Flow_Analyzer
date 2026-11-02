@@ -1,6 +1,8 @@
 package com.pia.vvs;
 
 import com.pia.vvs.analysis.ApplicationProcessRules;
+import com.pia.vvs.analysis.BranchFlow;
+import com.pia.vvs.analysis.BranchFlowProjector;
 import com.pia.vvs.analysis.PathAnalyzer;
 import com.pia.vvs.analysis.ProcessPath;
 import com.pia.vvs.graph.ProcessGraph;
@@ -34,14 +36,8 @@ public class Main {
             ProcessGraph graph = new ProcessGraph(process);
             printResults(file, process);
             printGraph(graph);
-            if (ApplicationProcessRules.PROCESS_ID.equals(processId)) {
-                Path output = args.length >= 3 ? Path.of(args[2]) : Path.of("target", "generated-tests");
-                generateTests(file, output, graph, maxReturns);
-            } else if (args.length >= 3) {
-                throw new IllegalArgumentException("La generación Gherkin solo está disponible para ApplicationProcess.");
-            } else {
-                System.out.println("La generación Gherkin solo está disponible para ApplicationProcess.");
-            }
+            Path output = args.length >= 3 ? Path.of(args[2]) : Path.of("target", "generated-tests");
+            generateResults(file, output, graph, maxReturns);
         } catch (IOException | IllegalArgumentException exception) {
             System.err.println("No se pudo analizar el BPMN: " + exception.getMessage());
             System.exit(1);
@@ -60,26 +56,57 @@ public class Main {
         }
     }
 
-    private static void generateTests(Path input, Path output, ProcessGraph graph, int maxReturns) throws IOException {
+    private static void generateResults(Path input, Path output, ProcessGraph graph, int maxReturns) throws IOException {
         List<ProcessPath> paths = new PathAnalyzer().analyze(graph, maxReturns);
         FlowTable table = new FlowTable();
         String csv = table.toCsv(graph.getProcess(), paths);
-        String feature = new GherkinGenerator().generate(graph.getProcess(), paths);
-        Path csvFile = output.resolve("ApplicationProcess.csv");
+        List<BranchFlow> branches = null;
+        try {
+            branches = new BranchFlowProjector().project(graph, paths);
+        } catch (IllegalArgumentException exception) {
+            System.err.println(exception.getMessage());
+            System.err.println("Se conservarán las salidas de caminos conjuntos. No se generará ni actualizará el CSV por ramas.");
+        }
+        String branchCsv = branches == null ? null : table.branchesToCsv(graph.getProcess(), branches);
+        boolean application = ApplicationProcessRules.PROCESS_ID.equals(graph.getProcess().getId());
+        String feature = application ? new GherkinGenerator().generate(graph.getProcess(), paths) : null;
+        String baseName = application ? "ApplicationProcess" : input.getFileName().toString().replaceFirst("\\.[^.]*$", "");
+        Path csvFile = output.resolve(baseName + ".csv");
+        Path branchFile = output.resolve(baseName + "-ramas.csv");
         Path featureFile = output.resolve("ApplicationProcess.feature");
         validateDestination(input, csvFile);
-        validateDestination(input, featureFile);
+        if (branchCsv != null) {
+            validateDestination(input, branchFile);
+        }
+        if (application) {
+            validateDestination(input, featureFile);
+        }
         Files.createDirectories(output);
         writeResult(csvFile, csv);
-        writeResult(featureFile, feature);
+        if (branchCsv != null) {
+            writeResult(branchFile, branchCsv);
+        }
+        if (application) {
+            writeResult(featureFile, feature);
+        }
+        System.out.println("\nAnálisis estructural: no se evalúan condiciones; COMPLETE no garantiza una ejecución viable.");
         System.out.println("\nTABLA DE FLUJOS\n" + table.toText(graph.getProcess(), paths));
         long complete = paths.stream().filter(ProcessPath::isComplete).count();
         System.out.println("Caminos completos: " + complete);
         System.out.println("Rutas truncadas: " + (paths.size() - complete));
         System.out.println("Límite de retornos por camino: " + maxReturns);
-        System.out.println("Escenarios Gherkin generados: " + complete);
-        System.out.println("Los escenarios requieren definiciones de pasos para ejecutarse con Cucumber.");
-        System.out.println("Archivos generados:\n" + csvFile + "\n" + featureFile);
+        if (branches != null) {
+            System.out.println("Flujos por ramas (BRANCH_VIEW): " + branches.size());
+            System.out.println("Son proyecciones de caminos completos, no ejecuciones independientes. Los truncados se excluyen de esta vista.");
+        }
+        if (application) {
+            System.out.println("Escenarios Gherkin generados: " + complete);
+            System.out.println("Los escenarios requieren definiciones de pasos para ejecutarse con Cucumber.");
+        } else {
+            System.out.println("La generación Gherkin solo está disponible para ApplicationProcess.");
+        }
+        System.out.println("Archivos generados:\n" + csvFile + (branchCsv != null ? "\n" + branchFile : "")
+                + (application ? "\n" + featureFile : ""));
     }
 
     private static void validateDestination(Path input, Path destination) throws IOException {

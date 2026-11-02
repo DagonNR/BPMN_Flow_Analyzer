@@ -5,6 +5,7 @@ import com.pia.vvs.model.BpmnNode;
 import com.pia.vvs.model.NodeType;
 import com.pia.vvs.model.SequenceFlow;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -12,6 +13,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+/** Explora alternativas estructurales; no evalúa condiciones ni permuta tareas concurrentes. */
 public class PathAnalyzer {
     private final ApplicationProcessRules rules = new ApplicationProcessRules();
 
@@ -50,7 +52,7 @@ public class PathAnalyzer {
             if (node.getType() == NodeType.END_EVENT) {
                 continue;
             }
-            List<List<SequenceFlow>> alternatives = rules.getAlternatives(graph, node);
+            List<List<SequenceFlow>> alternatives = alternatives(graph, node);
             if (alternatives.size() == 1) {
                 SequenceFlow blocked = activate(alternatives.get(0), state, backEdges, maxReturns);
                 if (blocked != null) {
@@ -59,17 +61,44 @@ public class PathAnalyzer {
                 }
                 continue;
             }
+            Set<String> blockedAlternatives = new HashSet<>();
             for (List<SequenceFlow> alternative : alternatives) {
                 State branch = new State(state);
                 SequenceFlow blocked = activate(alternative, branch, backEdges, maxReturns);
                 if (blocked == null) {
                     walk(graph, branch, backEdges, maxReturns, paths);
-                } else {
+                } else if (blockedAlternatives.add(blocked.getId())) {
+                    // La activación es atómica: mismo prefijo y bloqueo representan un solo truncado.
                     paths.add(branch.result(blocked));
                 }
             }
             return;
         }
+    }
+
+    private List<List<SequenceFlow>> alternatives(ProcessGraph graph, BpmnNode node) {
+        List<SequenceFlow> outgoing = graph.getOutgoingFlows(node.getId());
+        if (node.getType() == NodeType.EXCLUSIVE_GATEWAY) {
+            return outgoing.stream().map(List::of).toList();
+        }
+        if (node.getType() != NodeType.INCLUSIVE_GATEWAY) {
+            return List.of(outgoing);
+        }
+        if (ApplicationProcessRules.PROCESS_ID.equals(graph.getProcess().getId())) {
+            return rules.getAlternatives(graph, node);
+        }
+        // Todos los subconjuntos no vacíos son candidatos, no ejecuciones demostradas.
+        List<List<SequenceFlow>> combinations = new ArrayList<>();
+        combinations.add(List.of());
+        for (SequenceFlow flow : outgoing) {
+            int size = combinations.size();
+            for (int i = 0; i < size; i++) {
+                List<SequenceFlow> combination = new ArrayList<>(combinations.get(i));
+                combination.add(flow);
+                combinations.add(List.copyOf(combination));
+            }
+        }
+        return List.copyOf(combinations.subList(1, combinations.size()));
     }
 
     private BpmnNode nextNode(ProcessGraph graph, State state) {
@@ -81,11 +110,49 @@ public class PathAnalyzer {
             boolean enabled = node.getType() == NodeType.PARALLEL_GATEWAY
                     ? incoming.stream().allMatch(flow -> state.pending.containsKey(flow.getId()))
                     : incoming.stream().anyMatch(flow -> state.pending.containsKey(flow.getId()));
+            if (enabled && node.getType() == NodeType.INCLUSIVE_GATEWAY && incoming.size() > 1) {
+                enabled = inclusiveJoinReady(graph, node, state);
+            }
             if (enabled) {
                 return node;
             }
         }
         return null;
+    }
+
+    private boolean inclusiveJoinReady(ProcessGraph graph, BpmnNode join, State state) {
+        for (SequenceFlow incoming : graph.getIncomingFlows(join.getId())) {
+            if (state.pending.containsKey(incoming.getId())) {
+                continue;
+            }
+            for (SequenceFlow flow : graph.getProcess().getSequenceFlows()) {
+                if (state.pending.containsKey(flow.getId())
+                        && canReach(graph, flow.getTargetRef(), incoming.getSourceRef(), join.getId())) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // No se atraviesa la convergencia: sus salidas pertenecen al trabajo posterior.
+    private boolean canReach(ProcessGraph graph, String start, String target, String blocked) {
+        ArrayDeque<String> pending = new ArrayDeque<>();
+        Set<String> visited = new HashSet<>();
+        pending.add(start);
+        while (!pending.isEmpty()) {
+            String current = pending.removeFirst();
+            if (current.equals(blocked) || !visited.add(current)) {
+                continue;
+            }
+            if (current.equals(target)) {
+                return true;
+            }
+            for (SequenceFlow flow : graph.getOutgoingFlows(current)) {
+                pending.addLast(flow.getTargetRef());
+            }
+        }
+        return false;
     }
 
     private void consume(ProcessGraph graph, BpmnNode node, State state) {
@@ -97,7 +164,8 @@ public class PathAnalyzer {
                 } else {
                     state.pending.put(flow.getId(), count - 1);
                 }
-                if (node.getType() != NodeType.PARALLEL_GATEWAY) {
+                if (node.getType() != NodeType.PARALLEL_GATEWAY
+                        && node.getType() != NodeType.INCLUSIVE_GATEWAY) {
                     return;
                 }
             }
@@ -107,11 +175,16 @@ public class PathAnalyzer {
     private SequenceFlow activate(List<SequenceFlow> outgoing, State state,
                                   Set<String> backEdges, int maxReturns) {
         for (SequenceFlow flow : outgoing) {
+            if (backEdges.contains(flow.getId()) && state.returns.getOrDefault(flow.getId(), 0) == maxReturns) {
+                return flow;
+            }
+        }
+        if (outgoing.size() > 1) {
+            state.concurrentBranches.add(List.copyOf(outgoing));
+        }
+        for (SequenceFlow flow : outgoing) {
             if (backEdges.contains(flow.getId())) {
                 int count = state.returns.getOrDefault(flow.getId(), 0);
-                if (count == maxReturns) {
-                    return flow;
-                }
                 state.returns.put(flow.getId(), count + 1);
             }
             state.flows.add(flow);
@@ -154,6 +227,12 @@ public class PathAnalyzer {
                 throw new IllegalArgumentException("Tipo de nodo no soportado para caminos: " + node.getId());
             }
             List<SequenceFlow> outgoing = graph.getOutgoingFlows(node.getId());
+            if (node.getType() == NodeType.INCLUSIVE_GATEWAY
+                    && graph.getIncomingFlows(node.getId()).size() > 1
+                    && outgoing.stream().anyMatch(flow -> canReach(graph, flow.getTargetRef(), node.getId(), null))) {
+                throw new IllegalArgumentException("Convergencia inclusiva dentro de un ciclo no soportada: "
+                        + node.getId());
+            }
             if (node.getType() == NodeType.END_EVENT) {
                 if (!outgoing.isEmpty()) {
                     throw new IllegalArgumentException("Un evento final no debe tener salidas: " + node.getId());
@@ -173,6 +252,7 @@ public class PathAnalyzer {
     private static class State {
         private final List<BpmnNode> nodes = new ArrayList<>();
         private final List<SequenceFlow> flows = new ArrayList<>();
+        private final List<List<SequenceFlow>> concurrentBranches = new ArrayList<>();
         private final Map<String, Integer> pending = new HashMap<>();
         private final Map<String, Integer> returns = new HashMap<>();
 
@@ -181,12 +261,14 @@ public class PathAnalyzer {
         State(State source) {
             nodes.addAll(source.nodes);
             flows.addAll(source.flows);
+            concurrentBranches.addAll(source.concurrentBranches);
             pending.putAll(source.pending);
             returns.putAll(source.returns);
         }
 
         ProcessPath result(SequenceFlow blocked) {
-            return new ProcessPath(nodes, flows, blocked, returns.values().stream().mapToInt(Integer::intValue).sum());
+            return new ProcessPath(nodes, flows, blocked, returns.values().stream().mapToInt(Integer::intValue).sum(),
+                    concurrentBranches);
         }
     }
 }
