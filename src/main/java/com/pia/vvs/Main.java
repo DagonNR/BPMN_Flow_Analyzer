@@ -15,6 +15,7 @@ import com.pia.vvs.output.FlowTable;
 import com.pia.vvs.output.ExcelExporter;
 import com.pia.vvs.output.GherkinGenerator;
 import com.pia.vvs.output.TaskClassification;
+import com.pia.vvs.output.CucumberStepGenerator;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -83,12 +84,16 @@ public class Main {
         } else {
             System.err.println("No se generará ni actualizará Gherkin: tareas genéricas sin clasificar "
                     + classification.getUnclassifiedIds() + ". Complete " + classificationFile);
+            System.err.println("Tampoco se generará Java de pasos; cualquier .feature o Java anterior no corresponde a esta ejecución.");
         }
         String baseName = application ? "ApplicationProcess" : inputBase;
         Path csvFile = output.resolve(baseName + ".csv");
         Path branchFile = output.resolve(baseName + "-ramas.csv");
         Path featureFile = output.resolve(baseName + ".feature");
         Path excelFile = output.resolve(baseName + ".xlsx");
+        CucumberStepGenerator stepGenerator = new CucumberStepGenerator();
+        Path stepsFile = stepGenerator.destination(output, baseName);
+        String javaSteps = feature == null ? null : stepGenerator.generate(feature, baseName);
         validateDestination(input, csvFile);
         validateDestination(input, excelFile);
         if (branchCsv != null) {
@@ -96,8 +101,13 @@ public class Main {
         }
         if (feature != null) {
             validateDestination(input, featureFile);
+            validateDestination(input, stepsFile);
+            stepGenerator.validateExisting(stepsFile, javaSteps);
         }
         Files.createDirectories(output);
+        if (javaSteps != null) {
+            stepGenerator.write(stepsFile, javaSteps);
+        }
         new ExcelExporter().write(excelFile, graph.getProcess(), paths, branches);
         writeResult(csvFile, csv);
         if (branchCsv != null) {
@@ -120,9 +130,10 @@ public class Main {
             System.out.println("Escenarios Gherkin generados: " + feature.lines()
                     .filter(line -> line.startsWith("  Escenario:")).count());
             System.out.println("Los escenarios requieren definiciones de pasos para ejecutarse con Cucumber.");
+            System.out.println("Definiciones Java generadas con PendingException: requieren implementación funcional.");
         }
         System.out.println("Archivos generados:\n" + csvFile + (branchCsv != null ? "\n" + branchFile : "")
-                + "\n" + excelFile + (feature != null ? "\n" + featureFile : ""));
+                + "\n" + excelFile + (feature != null ? "\n" + featureFile + "\n" + stepsFile : ""));
     }
 
     private static void validateDestination(Path input, Path destination) throws IOException {

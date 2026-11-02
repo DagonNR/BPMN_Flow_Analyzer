@@ -19,6 +19,11 @@
             <groupId>io.cucumber</groupId>
             <artifactId>gherkin</artifactId>
             <version>42.0.1</version>
+        </dependency>
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-java</artifactId>
+            <version>8.0.4</version>
             <scope>test</scope>
         </dependency>
         <dependency>

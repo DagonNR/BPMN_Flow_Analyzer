@@ -43,10 +43,11 @@ Ambos archivos se encuentran en la carpeta `bpmn/`.
 - Excel nativo con hojas `Caminos` y `Ramas`, generado directamente en Java.
 - Clasificación de tareas humanas por tipo BPMN y configuración externa por ID.
 - Escenarios Gherkin para ApplicationProcess y Hardware Retailer.
+- Definiciones iniciales Java para Cucumber, con métodos explícitamente pendientes.
 
 **Pendientes:**
 
-- Generación de código Java inicial para Cucumber.
+- Completar los pasos con acciones y verificaciones de una aplicación real.
 
 ## Ejecución
 
@@ -192,14 +193,78 @@ expresiones ni elimina variantes con condiciones o resultados diferentes.
 La plantilla genérica utiliza eventos iniciales como contexto, tareas seleccionadas
 como acciones y eventos finales como resultados por comprobar. Las tablas Gherkin
 conservan nombres e IDs. La lista de actividades no impone un orden entre ramas
-concurrentes: las futuras definiciones de pasos deben respetar las dependencias del
+concurrentes: la implementación de los pasos debe respetar las dependencias del
 BPMN. Los comentarios identifican las salidas concurrentes y las tareas no seleccionadas.
 Las etiquetas de flujos se conservan como alternativas, no se interpretan como reglas.
 
 Son candidatos funcionales: el modelo no aporta datos de prueba, acciones de interfaz
 ni mecanismos para observar los resultados. La sintaxis se valida con el parser oficial
-`io.cucumber:gherkin`, usado solo en pruebas. No hay todavía definiciones Java,
-ejecución Cucumber ni Selenium; tampoco se garantiza la viabilidad de los candidatos.
+`io.cucumber:gherkin`, reutilizado en producción para generar Java. Las definiciones
+se generan pendientes; no hay integración Selenium ni se garantiza la viabilidad
+de los candidatos.
+
+### Definiciones Java para Cucumber
+
+La ejecución habitual también genera, dentro del directorio de salida:
+
+```text
+steps/com/pia/vvs/generated/applicationprocesssteps/ApplicationProcessSteps.java
+steps/com/pia/vvs/generated/hardwareretailersteps/HardwareRetailerSteps.java
+```
+
+Cada modelo tiene su paquete para poder seleccionar su glue por separado.
+`CucumberStepGenerator` transforma el Gherkin existente, sin volver a analizar BPMN.
+El parser resuelve `Y` según el tipo lógico anterior. Los pasos repetidos comparten
+una definición; las tablas se reciben como `DataTable` y los DocStrings como `String`.
+Los métodos `paso1`, `paso2`, etc. tienen anotaciones españolas con el texto completo
+del paso, escapado como expresión regular literal para evitar coincidencias accidentales.
+
+Si el mismo texto aparece con tipos lógicos o argumentos diferentes, se informa una
+ambigüedad y se pide distinguir la intención en el Gherkin. No se puede inferir una
+diferencia de comportamiento que no esté expresada en el texto o su firma.
+Los pasos con tabla y DocString simultáneos se rechazan explícitamente; nuestros
+modelos no los utilizan. No se descartan argumentos silenciosamente.
+
+Todos los métodos lanzan `PendingException`. Es el esqueleto previsto en III.B y la
+Figura 5 de De Moura, con la diferencia de que un método sin implementar no puede
+aparentar éxito. No se inventan acciones de navegador ni comprobaciones funcionales.
+
+**Protección del trabajo manual:** una clase existente se conserva. Si coincide
+exactamente con la generada, se reutiliza sin escribirla. Si difiere, incluso por
+un cambio del modelo o del límite de retornos, Main se detiene antes de actualizar
+las salidas; se debe elegir otro directorio y comparar manualmente. Si falta
+clasificación, no se genera ni actualiza Java y se advierte que los archivos previos
+no corresponden a esa ejecución. **Copiar las clases fuera de `target` antes de
+implementarlas: `mvn clean` elimina ese directorio.**
+
+Para verificar la generación y compilación automáticamente:
+
+```bash
+mvn test -Dtest=CucumberStepGeneratorTest
+```
+
+Las pruebas usan `JavaCompiler` con `--release 17`, comprueban los enlaces mediante
+Cucumber y verifican que la ejecución real queda pendiente. `cucumber-java` 8.0.4
+es una dependencia de pruebas; no se agrega un runner ni un segundo proyecto.
+
+Para compilar manualmente los archivos generados, después de ejecutar ambos BPMN,
+estos comandos de PowerShell preparan el classpath de pruebas y ejecutan `javac`:
+
+```powershell
+mvn dependency:build-classpath "-DincludeScope=test" "-Dmdep.outputFile=target/cucumber-classpath.txt"
+$cucumberClasspath = (Get-Content target/cucumber-classpath.txt -Raw).Trim()
+$stepSources = Get-ChildItem target/generated-tests/steps -Recurse -Filter *.java | Select-Object -ExpandProperty FullName
+javac --release 17 -encoding UTF-8 -cp $cucumberClasspath -d target/generated-step-classes $stepSources
+java -cp "target/generated-step-classes;$cucumberClasspath" io.cucumber.core.cli.Main --glue com.pia.vvs.generated.applicationprocesssteps --dry-run target/generated-tests/ApplicationProcess.feature
+java -cp "target/generated-step-classes;$cucumberClasspath" io.cucumber.core.cli.Main --glue com.pia.vvs.generated.hardwareretailersteps --dry-run target/generated-tests/HardwareRetailer.feature
+```
+
+El `dry-run` comprueba enlaces, no ejecuta acciones ni acredita pruebas funcionales.
+Al quitar `--dry-run`, los escenarios reportan estado pendiente y salida distinta
+de cero. Para usarlos posteriormente, copiar el paquete de pasos al proyecto de
+pruebas, conservar su `.feature`, configurar el glue correspondiente y completar
+datos, acciones y resultados observables. Las tablas de actividades requieren
+respetar las dependencias BPMN, sin imponer un orden entre ramas concurrentes.
 
 ## Contrato del análisis de caminos
 

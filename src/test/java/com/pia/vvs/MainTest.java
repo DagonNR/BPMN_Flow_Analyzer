@@ -1,5 +1,6 @@
 package com.pia.vvs;
 
+import com.pia.vvs.output.CucumberStepGenerator;
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import io.cucumber.gherkin.GherkinParser;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,9 @@ class MainTest {
         }
         String feature = Files.readString(Path.of("target/generated-tests/ApplicationProcess.feature"));
         assertEquals(7, feature.lines().filter(line -> line.strip().startsWith("Escenario:")).count());
+        Path java = new CucumberStepGenerator().destination(Path.of("target/generated-tests"), "ApplicationProcess");
+        assertTrue(Files.readString(java).contains("public class ApplicationProcessSteps"));
+        assertTrue(result.output().contains("PendingException"));
     }
 
     @Test
@@ -82,7 +86,7 @@ class MainTest {
         assertEquals(6, Files.readString(output.resolve("HardwareRetailer-ramas.csv")).lines().count());
         assertFeature(output.resolve("HardwareRetailer.feature"), 4);
         try (var files = Files.list(output)) {
-            assertEquals(List.of("HardwareRetailer-ramas.csv", "HardwareRetailer.csv", "HardwareRetailer.feature", "HardwareRetailer.xlsx"),
+            assertEquals(List.of("HardwareRetailer-ramas.csv", "HardwareRetailer.csv", "HardwareRetailer.feature", "HardwareRetailer.xlsx", "steps"),
                     files.map(path -> path.getFileName().toString()).sorted().toList());
         }
     }
@@ -92,11 +96,17 @@ class MainTest {
         Path input = Files.copy(Path.of("bpmn/HardwareRetailer.bpmn"), directory.resolve("model.bpmn"));
         Path output = Files.createDirectory(directory.resolve("output"));
         Path previous = Files.writeString(output.resolve("model.feature"), "resultado anterior");
+        Path oldJava = new CucumberStepGenerator().destination(output, "model");
+        Files.createDirectories(oldJava.getParent());
+        Files.writeString(oldJava, "implementación anterior");
         Execution result = run(input.toString(), "_6-1", output.toString());
         assertEquals(0, result.exitCode(), result.output());
         assertTrue(result.output().contains("No se generará ni actualizará Gherkin: tareas genéricas sin clasificar"));
         assertTrue(result.output().contains("model.tasks.properties"));
         assertEquals("resultado anterior", Files.readString(previous));
+        assertEquals("implementación anterior", Files.readString(oldJava));
+        assertTrue(result.output().contains("Tampoco se generará Java de pasos"));
+        assertFalse(result.output().substring(result.output().indexOf("Archivos generados:")).contains("Steps.java"));
         assertTrue(Files.isRegularFile(output.resolve("model.xlsx")));
         assertTrue(Files.isRegularFile(output.resolve("model-ramas.csv")));
         assertFalse(result.output().contains("Escenarios Gherkin generados:"));
@@ -141,6 +151,64 @@ class MainTest {
             assertTrue(envelopes.stream().noneMatch(envelope -> envelope.getParseError().isPresent()));
             assertEquals(scenarios, envelopes.stream().filter(envelope -> envelope.getPickle().isPresent()).count());
         }
+    }
+
+    @Test
+    void repeatedGenerationPreservesAnIdenticalJavaFile() throws Exception {
+        Path output = directory.resolve("output");
+        assertEquals(0, run(APPLICATION, APPLICATION_ID, output.toString()).exitCode());
+        Path java = new CucumberStepGenerator().destination(output, "ApplicationProcess");
+        byte[] original = Files.readAllBytes(java);
+        var modified = Files.getLastModifiedTime(java);
+        Execution second = run(APPLICATION, APPLICATION_ID, output.toString());
+        assertEquals(0, second.exitCode(), second.output());
+        assertArrayEquals(original, Files.readAllBytes(java));
+        assertEquals(modified, Files.getLastModifiedTime(java));
+    }
+
+    @Test
+    void protectsManualImplementationsBeforeUpdatingAnyOtherResult() throws Exception {
+        Path output = directory.resolve("output");
+        assertEquals(0, run(APPLICATION, APPLICATION_ID, output.toString(), "0").exitCode());
+        Path java = new CucumberStepGenerator().destination(output, "ApplicationProcess");
+        String implemented = Files.readString(java) + "\n// Trabajo manual que debe conservarse\n";
+        Files.writeString(java, implemented);
+        byte[] previousCsv = Files.readAllBytes(output.resolve("ApplicationProcess.csv"));
+        byte[] previousFeature = Files.readAllBytes(output.resolve("ApplicationProcess.feature"));
+        byte[] previousExcel = Files.readAllBytes(output.resolve("ApplicationProcess.xlsx"));
+        Execution result = run(APPLICATION, APPLICATION_ID, output.toString(), "2");
+        assertEquals(1, result.exitCode(), result.output());
+        assertTrue(result.output().contains("Se conserva el Java existente"));
+        assertTrue(result.output().contains("otro directorio"));
+        assertEquals(implemented, Files.readString(java));
+        assertArrayEquals(previousCsv, Files.readAllBytes(output.resolve("ApplicationProcess.csv")));
+        assertArrayEquals(previousFeature, Files.readAllBytes(output.resolve("ApplicationProcess.feature")));
+        assertArrayEquals(previousExcel, Files.readAllBytes(output.resolve("ApplicationProcess.xlsx")));
+    }
+
+    @Test
+    void reportsJavaWriteErrorsWithoutProducingTablesOrFeatures() throws Exception {
+        Path output = Files.createDirectory(directory.resolve("output"));
+        Path blocker = Files.writeString(output.resolve("steps"), "conservar");
+        Execution result = run(APPLICATION, APPLICATION_ID, output.toString());
+        assertEquals(1, result.exitCode(), result.output());
+        assertEquals("conservar", Files.readString(blocker));
+        assertFalse(Files.exists(output.resolve("ApplicationProcess.csv")));
+        assertFalse(Files.exists(output.resolve("ApplicationProcess.xlsx")));
+        assertFalse(Files.exists(output.resolve("ApplicationProcess.feature")));
+    }
+
+    @Test
+    void neverOverwritesAnInputAtTheGeneratedJavaDestination() throws Exception {
+        Path input = new CucumberStepGenerator().destination(directory, "ApplicationProcess");
+        Files.createDirectories(input.getParent());
+        Files.copy(Path.of(APPLICATION), input);
+        byte[] original = Files.readAllBytes(input);
+        Execution result = run(input.toString(), APPLICATION_ID, directory.toString());
+        assertEquals(1, result.exitCode(), result.output());
+        assertTrue(result.output().contains("no puede sobrescribir el BPMN de entrada"));
+        assertArrayEquals(original, Files.readAllBytes(input));
+        assertFalse(Files.exists(directory.resolve("ApplicationProcess.csv")));
     }
 
     @Test
