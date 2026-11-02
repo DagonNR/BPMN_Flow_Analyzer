@@ -1,6 +1,7 @@
 package com.pia.vvs;
 
 import org.apache.poi.xssf.usermodel.XSSFWorkbook;
+import io.cucumber.gherkin.GherkinParser;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -64,7 +65,7 @@ class MainTest {
     }
 
     @Test
-    void preservesHardwareGraphAnalysisAndGeneratesItsStructuralTableWithoutGherkin() throws Exception {
+    void preservesHardwareGraphAnalysisAndGeneratesItsTablesAndGherkin() throws Exception {
         Execution graph = run("bpmn/HardwareRetailer.bpmn", "_6-1");
         assertEquals(0, graph.exitCode(), graph.output());
         assertTrue(graph.output().contains("Nodos: 16"));
@@ -72,16 +73,73 @@ class MainTest {
         assertTrue(graph.output().contains("Rutas truncadas: 0"));
         assertTrue(graph.output().contains("Flujos por ramas (BRANCH_VIEW): 5"));
         assertTrue(graph.output().contains("COMPLETE no garantiza una ejecución viable"));
-        assertTrue(graph.output().contains("generación Gherkin solo está disponible para ApplicationProcess"));
+        assertTrue(graph.output().contains("Escenarios Gherkin generados: 4"));
 
         Path output = directory.resolve("hardware");
         Execution generation = run("bpmn/HardwareRetailer.bpmn", "_6-1", output.toString());
         assertEquals(0, generation.exitCode(), generation.output());
         assertEquals(5, Files.readString(output.resolve("HardwareRetailer.csv")).lines().count());
         assertEquals(6, Files.readString(output.resolve("HardwareRetailer-ramas.csv")).lines().count());
+        assertFeature(output.resolve("HardwareRetailer.feature"), 4);
         try (var files = Files.list(output)) {
-            assertEquals(List.of("HardwareRetailer-ramas.csv", "HardwareRetailer.csv", "HardwareRetailer.xlsx"),
+            assertEquals(List.of("HardwareRetailer-ramas.csv", "HardwareRetailer.csv", "HardwareRetailer.feature", "HardwareRetailer.xlsx"),
                     files.map(path -> path.getFileName().toString()).sorted().toList());
+        }
+    }
+
+    @Test
+    void reportsMissingClassificationAndPreservesAnyPreviousFeature() throws Exception {
+        Path input = Files.copy(Path.of("bpmn/HardwareRetailer.bpmn"), directory.resolve("model.bpmn"));
+        Path output = Files.createDirectory(directory.resolve("output"));
+        Path previous = Files.writeString(output.resolve("model.feature"), "resultado anterior");
+        Execution result = run(input.toString(), "_6-1", output.toString());
+        assertEquals(0, result.exitCode(), result.output());
+        assertTrue(result.output().contains("No se generará ni actualizará Gherkin: tareas genéricas sin clasificar"));
+        assertTrue(result.output().contains("model.tasks.properties"));
+        assertEquals("resultado anterior", Files.readString(previous));
+        assertTrue(Files.isRegularFile(output.resolve("model.xlsx")));
+        assertTrue(Files.isRegularFile(output.resolve("model-ramas.csv")));
+        assertFalse(result.output().contains("Escenarios Gherkin generados:"));
+    }
+
+    @Test
+    void loadsClassificationBesideRenamedInputWithoutDependingOnTheHardwareFileName() throws Exception {
+        Path input = Files.copy(Path.of("bpmn/HardwareRetailer.bpmn"), directory.resolve("otro nombre.bpmn"));
+        Files.copy(Path.of("bpmn/HardwareRetailer.tasks.properties"), directory.resolve("otro nombre.tasks.properties"));
+        Path output = directory.resolve("output");
+        Execution result = run(input.toString(), "_6-1", output.toString());
+        assertEquals(0, result.exitCode(), result.output());
+        assertFeature(output.resolve("otro nombre.feature"), 4);
+    }
+
+    @Test
+    void rejectsContradictoryClassificationBeforeWritingAnyOutput() throws Exception {
+        Path input = Files.copy(Path.of(APPLICATION), directory.resolve("app.bpmn"));
+        Files.writeString(directory.resolve("app.tasks.properties"), "processId=" + APPLICATION_ID + "\n_3=excluded");
+        Path output = directory.resolve("output");
+        Execution result = run(input.toString(), APPLICATION_ID, output.toString());
+        assertEquals(1, result.exitCode(), result.output());
+        assertTrue(result.output().contains("Clasificación contradictoria"));
+        assertFalse(Files.exists(output));
+    }
+
+    @Test
+    void neverOverwritesHardwareInputNamedLikeItsFeature() throws Exception {
+        Path input = Files.copy(Path.of("bpmn/HardwareRetailer.bpmn"), directory.resolve("model.feature"));
+        byte[] original = Files.readAllBytes(input);
+        Files.copy(Path.of("bpmn/HardwareRetailer.tasks.properties"), directory.resolve("model.tasks.properties"));
+        Execution result = run(input.toString(), "_6-1", directory.toString());
+        assertEquals(1, result.exitCode(), result.output());
+        assertTrue(result.output().contains("no puede sobrescribir el BPMN de entrada"));
+        assertArrayEquals(original, Files.readAllBytes(input));
+        assertFalse(Files.exists(directory.resolve("model.csv")));
+    }
+
+    private void assertFeature(Path file, int scenarios) throws Exception {
+        try (var stream = GherkinParser.builder().build().parse(file)) {
+            var envelopes = stream.toList();
+            assertTrue(envelopes.stream().noneMatch(envelope -> envelope.getParseError().isPresent()));
+            assertEquals(scenarios, envelopes.stream().filter(envelope -> envelope.getPickle().isPresent()).count());
         }
     }
 

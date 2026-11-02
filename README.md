@@ -41,11 +41,11 @@ Ambos archivos se encuentran en la carpeta `bpmn/`.
 - Tablas de tareas en consola y CSV para ambos modelos.
 - CSV adicional de flujos por ramas AND, con trazabilidad a los caminos completos.
 - Excel nativo con hojas `Caminos` y `Ramas`, generado directamente en Java.
-- Escenarios Gherkin para ApplicationProcess.
+- Clasificación de tareas humanas por tipo BPMN y configuración externa por ID.
+- Escenarios Gherkin para ApplicationProcess y Hardware Retailer.
 
 **Pendientes:**
 
-- Generación de escenarios Gherkin para Hardware Retailer.
 - Generación de código Java inicial para Cucumber.
 
 ## Ejecución
@@ -92,8 +92,8 @@ Sin argumentos utiliza ApplicationProcess. El directorio predeterminado es
 `target/generated-tests` y el límite predeterminado es `2` (admite de 0 a 100).
 ApplicationProcess genera `ApplicationProcess.csv`, `ApplicationProcess-ramas.csv`,
 `ApplicationProcess.xlsx` y `ApplicationProcess.feature`. Hardware Retailer genera
-`HardwareRetailer.csv`, `HardwareRetailer-ramas.csv` y `HardwareRetailer.xlsx`,
-sin generar Gherkin. Para otros modelos se utiliza
+`HardwareRetailer.csv`, `HardwareRetailer-ramas.csv`, `HardwareRetailer.xlsx` y
+`HardwareRetailer.feature`. Para otros modelos se utiliza
 el nombre base del archivo de entrada. El CSV sin sufijo conserva los caminos
 conjuntos, incluidos los truncados; el sufijo `-ramas` identifica las proyecciones
 de caminos completos descritas más adelante.
@@ -149,7 +149,57 @@ El programa muestra los elementos, conexiones, tabla y conteos en consola.
 | ApplicationProcess | 0 | 3 | 1 | 3 | 3 |
 | ApplicationProcess | 1 | 5 | 1 | 5 | 5 |
 | ApplicationProcess | 2 | 7 | 1 | 7 | 7 |
-| Hardware Retailer | 2 | 4 | 0 | 5 | No implementados |
+| Hardware Retailer | 2 | 4 | 0 | 5 | 4 |
+
+### Clasificación de tareas y Gherkin
+
+`userTask` y `manualTask` se seleccionan automáticamente. Las tareas genéricas
+`task` requieren clasificación adicional; los tipos automáticos no se convierten
+en acciones de usuario. No se deduce el tipo a partir del nombre de la tarea.
+
+Main busca junto al BPMN un archivo con el mismo nombre base y sufijo
+`.tasks.properties`, sin cambiar los argumentos existentes. Por ejemplo,
+`bpmn/HardwareRetailer.tasks.properties` contiene un `processId` y entradas por ID:
+
+```properties
+processId=_6-1
+_6-102=human
+_6-226=excluded
+```
+
+El archivo completo incluido clasifica las ocho tareas. `human` incorpora una tarea
+genérica a las acciones funcionales; `excluded` la deja fuera de esas acciones,
+sin afirmar que sea automática ni eliminarla del análisis. Se comprueban el proceso,
+los IDs, los valores y las claves duplicadas. No se permite excluir una tarea humana
+explícita ni convertir una tarea de servicio, script u otro tipo especializado en humana.
+Si quedan tareas genéricas sin clasificar, Main informa los IDs y genera las tablas,
+pero no crea ni actualiza el `.feature`; un archivo previo sigue siendo un resultado
+anterior. Una configuración inválida detiene la ejecución antes de escribir salidas.
+
+ApplicationProcess conserva su plantilla de dominio validada: `_3` es la acción
+humana, DMF/OIG son contexto y la reevaluación y los finales son resultados. No exige
+clasificar sus nueve tareas genéricas porque esa plantilla ya establece sus papeles.
+Con L=2 mantiene siete escenarios: seis con revisión humana, incluidas sus repeticiones,
+y uno de rechazo automático inicial. Si una configuración selecciona más tareas humanas,
+se utiliza la plantilla genérica para incluirlas, sin ignorar esa selección.
+
+El generador usa exclusivamente caminos `COMPLETE`. Agrupa los que tienen la misma
+secuencia de IDs de acciones humanas (con repeticiones), los mismos textos de alternativas
+y condiciones, y los mismos IDs de eventos iniciales y finales. Conserva todos los
+orígenes F y sus `sequenceFlow` en comentarios. No decide equivalencia lógica entre
+expresiones ni elimina variantes con condiciones o resultados diferentes.
+
+La plantilla genérica utiliza eventos iniciales como contexto, tareas seleccionadas
+como acciones y eventos finales como resultados por comprobar. Las tablas Gherkin
+conservan nombres e IDs. La lista de actividades no impone un orden entre ramas
+concurrentes: las futuras definiciones de pasos deben respetar las dependencias del
+BPMN. Los comentarios identifican las salidas concurrentes y las tareas no seleccionadas.
+Las etiquetas de flujos se conservan como alternativas, no se interpretan como reglas.
+
+Son candidatos funcionales: el modelo no aporta datos de prueba, acciones de interfaz
+ni mecanismos para observar los resultados. La sintaxis se valida con el parser oficial
+`io.cucumber:gherkin`, usado solo en pruebas. No hay todavía definiciones Java,
+ejecución Cucumber ni Selenium; tampoco se garantiza la viabilidad de los candidatos.
 
 ## Contrato del análisis de caminos
 
@@ -299,10 +349,28 @@ las tareas que aparecen en esa figura, las tres filas resultan iguales. R1 y R4
 aportan las otras dos variantes. Esto explica los tres escenarios observados, sin
 afirmar que el artículo detalle un algoritmo general de deduplicación.
 
-Hay una limitación para reproducir automáticamente ese filtro: nuestro XML declara
-las ocho tareas como `semantic:task`, sin `userTask` ni `manualTask`. Haría falta una
-clasificación explícita o un modelo que conserve esos tipos; no conviene inferirlos
-por nombre o inventar reglas basadas en IDs. Gherkin para Hardware sigue pendiente.
+Nuestro XML declara las ocho tareas como `semantic:task`, sin `userTask` ni
+`manualTask`. El perfil externo reproduce la selección de la Figura 4 por correspondencia
+entre nombres e IDs del XML: decidir envío (`_6-102`), asignar transportista (`_6-277`),
+comprobar necesidad de seguro (`_6-379`), empaquetar (`_6-153`) y añadir documentación
+(`_6-569`). Se excluyen de las acciones cotizaciones (`_6-226`), contratar seguro
+(`_6-452`) y etiqueta (`_6-328`). Esto documenta el perfil funcional del artículo;
+la omisión de cotizaciones no demuestra por sí sola su tipo de ejecución en un BPMS.
+
+**Decisión de esta implementación:** generar desde los cuatro caminos completos,
+con ambas ramas AND y su reunión. Se obtienen cuatro candidatos: transportista y
+tres alternativas de correo (seguro, etiqueta, ambos). Se conservan los textos
+`extra insurance required` y `Always` como alternativas diferentes, sin interpretar
+`Always` como una obligación. Por eso las tres variantes postales no se deduplican.
+No se agregan reglas de negocio para forzar tres escenarios.
+
+Los tres fragmentos de la Figura 4 separan la rama de empaquetado y omiten la división
+OR posterior a las tareas humanas. Una prueba comprueba que proyectar nuestras cinco
+filas por ramas sobre las cinco tareas seleccionadas produce esas tres combinaciones.
+Esa correspondencia no convierte una `BRANCH_VIEW` en una ejecución independiente;
+nuestro `.feature` conserva la sincronización mediante los caminos completos.
+El artículo ofrece esqueletos con pasos vacíos (Figuras 4 y 5); aquí se generan pasos
+genéricos no vacíos, que aún requieren datos, observaciones y una implementación posterior.
 
 Otras diferencias verificadas: III.C trata los subprocesos como una tarea opaca,
 mientras nuestro analizador los rechaza; su delimitador controla repeticiones de un
@@ -367,6 +435,9 @@ mvn package
 ```
 
 Las pruebas cubren parser, grafo, análisis, tablas CSV/Excel, Gherkin y ejecuciones de Main.
+La clasificación se prueba por tipo e ID, con perfiles válidos, incompletos y
+contradictorios. Los escenarios se analizan formalmente en español y se comprueban
+acciones, resultados, condiciones, deduplicación, ciclos, trazabilidad y caracteres especiales.
 Los XLSX se reabren con Apache POI para comprobar hojas, dimensiones, tipos de celda,
 contenido completo frente al CSV, truncamientos, trazabilidad, texto especial y
 errores de escritura. No se ejecutan fórmulas ni se requiere Excel instalado.

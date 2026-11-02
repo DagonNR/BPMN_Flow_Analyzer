@@ -14,6 +14,7 @@ import com.pia.vvs.parser.BpmnParser;
 import com.pia.vvs.output.FlowTable;
 import com.pia.vvs.output.ExcelExporter;
 import com.pia.vvs.output.GherkinGenerator;
+import com.pia.vvs.output.TaskClassification;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -59,6 +60,11 @@ public class Main {
     }
 
     private static void generateResults(Path input, Path output, ProcessGraph graph, int maxReturns) throws IOException {
+        String inputBase = input.getFileName().toString().replaceFirst("\\.[^.]*$", "");
+        Path classificationFile = input.resolveSibling(inputBase + ".tasks.properties");
+        TaskClassification classification = Files.exists(classificationFile)
+                ? TaskClassification.load(graph.getProcess(), classificationFile)
+                : TaskClassification.automatic(graph.getProcess());
         List<ProcessPath> paths = new PathAnalyzer().analyze(graph, maxReturns);
         FlowTable table = new FlowTable();
         String csv = table.toCsv(graph.getProcess(), paths);
@@ -71,18 +77,24 @@ public class Main {
         }
         String branchCsv = branches == null ? null : table.branchesToCsv(graph.getProcess(), branches);
         boolean application = ApplicationProcessRules.PROCESS_ID.equals(graph.getProcess().getId());
-        String feature = application ? new GherkinGenerator().generate(graph.getProcess(), paths) : null;
-        String baseName = application ? "ApplicationProcess" : input.getFileName().toString().replaceFirst("\\.[^.]*$", "");
+        String feature = null;
+        if (application || classification.getUnclassifiedIds().isEmpty()) {
+            feature = new GherkinGenerator().generate(graph.getProcess(), paths, classification);
+        } else {
+            System.err.println("No se generará ni actualizará Gherkin: tareas genéricas sin clasificar "
+                    + classification.getUnclassifiedIds() + ". Complete " + classificationFile);
+        }
+        String baseName = application ? "ApplicationProcess" : inputBase;
         Path csvFile = output.resolve(baseName + ".csv");
         Path branchFile = output.resolve(baseName + "-ramas.csv");
-        Path featureFile = output.resolve("ApplicationProcess.feature");
+        Path featureFile = output.resolve(baseName + ".feature");
         Path excelFile = output.resolve(baseName + ".xlsx");
         validateDestination(input, csvFile);
         validateDestination(input, excelFile);
         if (branchCsv != null) {
             validateDestination(input, branchFile);
         }
-        if (application) {
+        if (feature != null) {
             validateDestination(input, featureFile);
         }
         Files.createDirectories(output);
@@ -91,7 +103,7 @@ public class Main {
         if (branchCsv != null) {
             writeResult(branchFile, branchCsv);
         }
-        if (application) {
+        if (feature != null) {
             writeResult(featureFile, feature);
         }
         System.out.println("\nAnálisis estructural: no se evalúan condiciones; COMPLETE no garantiza una ejecución viable.");
@@ -104,14 +116,13 @@ public class Main {
             System.out.println("Flujos por ramas (BRANCH_VIEW): " + branches.size());
             System.out.println("Son proyecciones de caminos completos, no ejecuciones independientes. Los truncados se excluyen de esta vista.");
         }
-        if (application) {
-            System.out.println("Escenarios Gherkin generados: " + complete);
+        if (feature != null) {
+            System.out.println("Escenarios Gherkin generados: " + feature.lines()
+                    .filter(line -> line.startsWith("  Escenario:")).count());
             System.out.println("Los escenarios requieren definiciones de pasos para ejecutarse con Cucumber.");
-        } else {
-            System.out.println("La generación Gherkin solo está disponible para ApplicationProcess.");
         }
         System.out.println("Archivos generados:\n" + csvFile + (branchCsv != null ? "\n" + branchFile : "")
-                + "\n" + excelFile + (application ? "\n" + featureFile : ""));
+                + "\n" + excelFile + (feature != null ? "\n" + featureFile : ""));
     }
 
     private static void validateDestination(Path input, Path destination) throws IOException {
