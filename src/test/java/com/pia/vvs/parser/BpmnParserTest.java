@@ -4,6 +4,8 @@ import com.pia.vvs.model.BpmnNode;
 import com.pia.vvs.model.BpmnProcess;
 import com.pia.vvs.model.NodeType;
 import com.pia.vvs.model.SequenceFlow;
+import com.pia.vvs.analysis.PathAnalyzer;
+import com.pia.vvs.graph.ProcessGraph;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,6 +28,75 @@ class BpmnParserTest {
 
     @TempDir
     Path tempDirectory;
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "b:"})
+    void diagnosesUnknownBpmnChildrenEvenWithoutASequenceFlowReference(String prefix) throws IOException {
+        Path file = writeXml("""
+                <definitions xmlns="%s" xmlns:b="%s">
+                  <process id="test"><%susreTask id="typo"/></process>
+                </definitions>
+                """.formatted(NAMESPACE, NAMESPACE, prefix));
+        IOException error = assertThrows(IOException.class, () -> parser.parse(file, "test"));
+        assertTrue(error.getMessage().contains("Elemento BPMN desconocido"));
+        assertTrue(error.getMessage().contains(prefix + "usreTask"));
+        assertTrue(error.getMessage().contains("typo"));
+        assertTrue(error.getMessage().contains("test"));
+        assertTrue(error.getMessage().contains("Revise el nombre"));
+    }
+
+    @Test
+    void ignoresLegitimateProcessMetadataAndDataWithoutAddingControlNodes() throws IOException {
+        Path file = writeXml("""
+                <definitions xmlns="%s">
+                  <process id="test">
+                    <documentation>Proceso de ejemplo</documentation>
+                    <supportedInterfaceRef>interface</supportedInterfaceRef><ioSpecification/><ioBinding/>
+                    <auditing/><monitoring/><property id="property"/>
+                    <laneSet id="lanes"><lane id="lane"><flowNodeRef>s</flowNodeRef></lane></laneSet>
+                    <dataObject id="data"/><dataObjectReference id="ref" dataObjectRef="data"/>
+                    <dataStoreReference id="store"/><textAnnotation id="note"><text>Nota</text></textAnnotation>
+                    <association id="assoc" sourceRef="note" targetRef="s"/><group id="group"/>
+                    <resourceRole/><performer/><humanPerformer/><potentialOwner/>
+                    <correlationSubscription/><supports>other</supports>
+                    <startEvent id="s"/><endEvent id="e"/>
+                    <sequenceFlow id="f" sourceRef="s" targetRef="e"/>
+                  </process>
+                </definitions>
+                """.formatted(NAMESPACE));
+        BpmnProcess process = parser.parse(file, "test");
+        assertEquals(java.util.Set.of("s", "e"), process.getNodes().keySet());
+        assertEquals(1, process.getSequenceFlows().size());
+        assertTrue(new PathAnalyzer().analyze(new ProcessGraph(process), 2).get(0).isComplete());
+    }
+
+    @Test
+    void leavesForeignElementsAndExtensionContentsOutsideTheControlGraph() throws IOException {
+        Path file = writeXml("""
+                <definitions xmlns="%s" xmlns:ext="urn:vendor">
+                  <process id="test">
+                    <extensionElements><ext:config/><usreTask id="extension-content"/></extensionElements>
+                    <ext:usreTask id="foreign"/><ext:sequenceFlow sourceRef="missing" targetRef="missing"/>
+                    <startEvent id="s"/><endEvent id="e"/>
+                    <sequenceFlow id="f" sourceRef="s" targetRef="e"/>
+                  </process>
+                </definitions>
+                """.formatted(NAMESPACE));
+        BpmnProcess process = parser.parse(file, "test");
+        assertEquals(java.util.Set.of("s", "e"), process.getNodes().keySet());
+        assertEquals(1, process.getSequenceFlows().size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"transaction", "adHocSubProcess"})
+    void distinguishesKnownUnsupportedElementsFromMisspelledTags(String tag) throws IOException {
+        Path file = writeXml("<definitions xmlns=\"" + NAMESPACE
+                + "\"><process id=\"test\"><" + tag + " id=\"unsupported\"/></process></definitions>");
+        IOException error = assertThrows(IOException.class, () -> parser.parse(file, "test"));
+        assertTrue(error.getMessage().contains("Elemento BPMN no soportado"));
+        assertTrue(error.getMessage().contains(tag));
+        assertFalse(error.getMessage().contains("desconocido"));
+    }
 
     @Test
     void readsExpectedApplicationCounts() throws IOException {
@@ -104,6 +175,29 @@ class BpmnParserTest {
         assertEquals("success", flow.getName());
         assertEquals("return \"SUCCESS\".equals(model.getProcessResults()"
                 + ".getValidationResult().getStatus().getStatusCode());", flow.getCondition());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"default", "loop", "multiInstance"})
+    void preservesStructuralReadingButRejectsGenerationWithUnsupportedBehavior(String behavior) throws IOException {
+        String xml = Files.readString(APPLICATION);
+        if (behavior.equals("default")) {
+            xml = xml.replace("id=\"_7\" name=\"Reject Or Verify\"", "id=\"_7\" default=\"_7-_34\" name=\"Reject Or Verify\"");
+        } else {
+            String loop = behavior.equals("loop")
+                    ? "<standardLoopCharacteristics testBefore='true'><loopCondition xsi:type='tFormalExpression'>false</loopCondition></standardLoopCharacteristics>"
+                    : "<multiInstanceLoopCharacteristics isSequential='true'/>";
+            xml = xml.replace("<userTask id=\"_3\" name=\"Manual Review\" >",
+                    "<userTask id=\"_3\" name=\"Manual Review\" >" + loop);
+        }
+
+        BpmnProcess process = parser.parse(writeXml(xml), PROCESS_ID);
+
+        assertEquals(19, process.getNodes().size());
+        assertEquals(20, process.getSequenceFlows().size());
+        IllegalArgumentException error = assertThrows(IllegalArgumentException.class,
+                () -> new PathAnalyzer().analyze(new ProcessGraph(process), 2));
+        assertTrue(error.getMessage().contains("no soportad"));
     }
 
     @ParameterizedTest

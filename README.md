@@ -1,108 +1,89 @@
 # BPMN Flow Analyzer
 
-Proyecto desarrollado para la materia de Verificación y Validación de Software.
+Proyecto desarrollado para la materia de **Verificación y Validación de Software**.
 
 ## Objetivo
 
-Desarrollar una herramienta en Java que permita analizar modelos BPMN,
-identificar sus posibles flujos de ejecución y generar casos de prueba,
-tomando como referencia el procedimiento propuesto por De Moura (2017).
+Analizar modelos BPMN para identificar caminos y generar archivos que sirvan como base para casos de prueba, tomando como referencia el procedimiento de **De Moura et al. (2017)**.
 
-## Modelos BPMN
+## Requisitos
 
-Se utilizan dos modelos para el desarrollo y las pruebas:
+- Java 17 o superior.
+- Maven.
+
+No es necesario tener Microsoft Excel instalado.
+
+## Modelos incluidos
+
+En la carpeta `bpmn/` se incluyen dos modelos:
 
 - **ApplicationProcess.bpmn:** proceso de evaluación de solicitudes de inscripción de proveedores de servicios de salud.
-- **HardwareRetailer.bpmn:** proceso utilizado como referencia en el trabajo de De Moura.
-
-Ambos archivos se encuentran en la carpeta `bpmn/`.
-
-## Tecnologías
-
-- Java 17
-- Maven
-- JUnit
-- Git y GitHub
+- **HardwareRetailer.bpmn:** proceso utilizado como referencia en el artículo de De Moura.
 
 ## Funcionalidades
 
-**Implementadas:**
+- Lectura de modelos BPMN y construcción de su grafo de tareas y conexiones.
+- Análisis de caminos con compuertas XOR, OR y AND, concurrencia y límite de retornos.
+- Generación de tablas de caminos y ramas en CSV y Excel.
+- Identificación de tareas humanas y generación de escenarios Gherkin (`.feature`).
+- Generación de clases Java iniciales con definiciones de pasos para Cucumber.
 
-- Lectura de archivos BPMN 2.0.
-- Identificación de tareas, eventos y gateways.
-- Extracción de conexiones mediante `sequenceFlow`.
-- Construcción de un grafo dirigido.
-- Consulta de conexiones entrantes y salientes.
-- Selección del archivo BPMN y proceso mediante argumentos.
-- Validación de archivos, identificadores y referencias.
+## Instalación y ejecución
 
-**Pendientes:**
-
-- Identificación de caminos de ejecución.
-- Manejo de decisiones y ciclos.
-- Generación de tablas de flujos en Excel.
-- Generación de escenarios Gherkin.
-- Generación de código Java inicial para Cucumber.
-
-## Ejecución
-
-Se requiere Java 17 o superior y Maven.
-
-Desde la raíz del proyecto, compilar con:
+Desde la carpeta principal del proyecto, compilar con:
 
 ```bash
 mvn package
 ```
 
-**Ejecutar ApplicationProcess (predeterminado):**
+**Ejecutar el modelo predeterminado (ApplicationProcess):**
 
 ```bash
-java -cp target/classes com.pia.vvs.Main
-```
-
-**Ejecutar un BPMN específico:**
-
-```bash
-java -cp target/classes com.pia.vvs.Main "bpmn/ApplicationProcess.bpmn" "gov.medicaid.process.application"
+java -cp "target/classes;target/dependency/*" com.pia.vvs.Main
 ```
 
 **Ejecutar Hardware Retailer:**
 
 ```bash
-java -cp target/classes com.pia.vvs.Main "bpmn/HardwareRetailer.bpmn" "_6-1"
+java -cp "target/classes;target/dependency/*" com.pia.vvs.Main "bpmn/HardwareRetailer.bpmn" "_6-1"
 ```
 
-El programa recibe dos argumentos: la ruta del archivo BPMN y el ID del proceso.
-Si no se proporcionan argumentos, utiliza ApplicationProcess.
-
-## Resultados esperados
-
-| Elemento | ApplicationProcess | Hardware Retailer |
-|---|---:|---:|
-| Tareas | 10 | 8 |
-| Gateways | 5 | 6 |
-| Eventos iniciales | 1 | 1 |
-| Eventos finales | 3 | 1 |
-| Sequence Flows | 20 | 18 |
-| Total de nodos | 19 | 16 |
-
-El programa muestra los elementos identificados y sus conexiones en consola.
-
-## Pruebas
-
-Las pruebas unitarias se realizan con JUnit 5 y se encuentran en `src/test/`.
-
-Para ejecutarlas:
+**Ejecutar otro modelo e indicar opciones:**
 
 ```bash
-mvn test
+java -cp "target/classes;target/dependency/*" com.pia.vvs.Main "archivo.bpmn" "idProceso" "carpetaSalida" 2
 ```
 
-Actualmente se cuenta con 47 pruebas unitarias.
+Los dos primeros argumentos indican el archivo BPMN y el ID del proceso. La carpeta de salida y el número máximo de retornos son opcionales. El límite predeterminado es **2** (se permiten valores de 0 a 100).
 
-## Estado del proyecto
+En Windows se usa `;` para separar las rutas del classpath; en Linux y macOS debe cambiarse por `:`.
 
-- **Etapa 1:** lectura e identificación de elementos BPMN. Completada.
-- **Etapa 2:** construcción del grafo de conexiones. Completada.
-- **Etapa 3:** análisis de caminos y generación de tablas. Pendiente.
-- **Etapa 4:** generación de escenarios Gherkin y código Cucumber. Pendiente.
+## Archivos generados
+
+Por defecto, los resultados se guardan en `target/generated-tests/`.
+
+| Archivo | Contenido |
+|---|---|
+| `<modelo>.csv` | Caminos identificados, incluidos los truncados. |
+| `<modelo>-ramas.csv` | Vista de las ramas de los caminos completos. |
+| `<modelo>.xlsx` | Excel con las hojas **Caminos** y **Ramas**. |
+| `<modelo>.feature` | Escenarios generados en Gherkin. |
+| `<Modelo>Steps.java` | Definiciones iniciales de pasos para Cucumber, dentro de `steps/`. |
+
+Los caminos completos y las vistas por ramas son representaciones diferentes: una rama no debe interpretarse como una ejecución independiente del proceso.
+
+**Importante:** si se desea completar manualmente una clase Java generada, debe copiarse fuera de `target/`, ya que `mvn clean` elimina esa carpeta.
+
+## Clasificación de tareas
+
+Las tareas BPMN de tipo `userTask` y `manualTask` se reconocen automáticamente. Para las tareas genéricas `task`, se puede colocar un archivo `<modelo>.tasks.properties` junto al BPMN, indicando sus IDs:
+
+```properties
+processId=_6-1
+_6-102=human
+_6-226=excluded
+```
+
+`human` selecciona una tarea como acción humana; `excluded` la deja fuera de esa selección. El modelo Hardware Retailer incluye su archivo de configuración completo.
+
+Si faltan clasificaciones necesarias, el programa puede generar las tablas, pero no generará nuevos archivos Gherkin ni Java para ese modelo.

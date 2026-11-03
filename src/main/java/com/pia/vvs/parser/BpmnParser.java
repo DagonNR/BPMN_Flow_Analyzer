@@ -27,6 +27,15 @@ import java.util.Set;
 
 public class BpmnParser {
     private static final String BPMN_NAMESPACE = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+    // Hijos de process que no definen nodos ni conexiones de control (Semantic.xsd).
+    // Se ignora su contenido; esto no es una validación completa del esquema BPMN.
+    private static final Set<String> IGNORED_PROCESS_ELEMENTS = Set.of(
+            "documentation", "extensionElements", "auditing", "monitoring", "property", "laneSet",
+            "dataObject", "dataObjectReference", "dataStoreReference", "association", "textAnnotation", "group",
+            "supportedInterfaceRef", "ioSpecification", "ioBinding", "resourceRole", "performer",
+            "humanPerformer", "potentialOwner", "correlationSubscription", "supports");
+    private static final Set<String> UNSUPPORTED_PROCESS_ELEMENTS = Set.of(
+            "adHocSubProcess", "transaction", "choreographyTask", "subChoreography", "callChoreography");
 
     public BpmnProcess parse(Path file, String processId) throws IOException {
         Objects.requireNonNull(file, "La ruta del archivo es obligatoria.");
@@ -41,6 +50,7 @@ public class BpmnParser {
         Element process = findProcess(document, processId);
         List<BpmnNode> nodes = new ArrayList<>();
         List<SequenceFlow> flows = new ArrayList<>();
+        List<String> unsupportedBehaviors = new ArrayList<>();
         Set<String> ids = new HashSet<>();
         ids.add(processId);
 
@@ -51,13 +61,23 @@ public class BpmnParser {
             }
             NodeType type = NodeType.fromXmlName(element.getLocalName());
             if (type == null && !"sequenceFlow".equals(element.getLocalName())) {
-                continue;
+                if (IGNORED_PROCESS_ELEMENTS.contains(element.getLocalName())) {
+                    continue;
+                }
+                String detail = "<" + element.getTagName() + "> (id=" + element.getAttribute("id")
+                        + ") en el proceso '" + processId + "'. ";
+                if (UNSUPPORTED_PROCESS_ELEMENTS.contains(element.getLocalName())) {
+                    throw new IOException("Elemento BPMN no soportado: " + detail);
+                }
+                throw new IOException("Elemento BPMN desconocido en este contexto: " + detail
+                        + "Revise el nombre de la etiqueta y su ubicación dentro del proceso.");
             }
             String id = requiredAttribute(element, "id");
             if (!ids.add(id)) {
                 throw new IOException("ID BPMN duplicado en el proceso: " + id);
             }
             if (type != null) {
+                readUnsupportedBehaviors(element, unsupportedBehaviors);
                 nodes.add(new BpmnNode(id, element.getAttribute("name"), type));
             } else {
                 flows.add(new SequenceFlow(id, requiredAttribute(element, "sourceRef"),
@@ -66,12 +86,25 @@ public class BpmnParser {
             }
         }
 
-        BpmnProcess result = new BpmnProcess(processId, process.getAttribute("name"), nodes, flows);
+        BpmnProcess result = new BpmnProcess(processId, process.getAttribute("name"), nodes, flows, unsupportedBehaviors);
         for (SequenceFlow flow : flows) {
             validateReference(result, flow, flow.getSourceRef(), "sourceRef");
             validateReference(result, flow, flow.getTargetRef(), "targetRef");
         }
         return result;
+    }
+
+    private void readUnsupportedBehaviors(Element node, List<String> behaviors) {
+        if (node.hasAttribute("default")) {
+            behaviors.add("flujo por defecto en " + node.getAttribute("id"));
+        }
+        for (Node child = node.getFirstChild(); child != null; child = child.getNextSibling()) {
+            if (child instanceof Element element && isBpmnElement(element)
+                    && ("standardLoopCharacteristics".equals(element.getLocalName())
+                    || "multiInstanceLoopCharacteristics".equals(element.getLocalName()))) {
+                behaviors.add(element.getLocalName() + " en " + node.getAttribute("id"));
+            }
+        }
     }
 
     private Document readDocument(Path file) throws IOException {
