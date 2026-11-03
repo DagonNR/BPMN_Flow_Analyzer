@@ -9,6 +9,7 @@ import com.pia.vvs.model.NodeType;
 import com.pia.vvs.model.SequenceFlow;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -49,7 +50,7 @@ public class GherkinGenerator {
             ProcessPath path = paths.get(origins.get(0));
             feature.append("\n  # Flujo: ").append(origins.stream().map(i -> "F" + (i + 1))
                     .collect(Collectors.joining(", "))).append('\n');
-            String end = path.getNodes().get(path.getNodes().size() - 1).getId();
+            String end = eventIds(path, NodeType.END_EVENT).stream().distinct().collect(Collectors.joining(";"));
             feature.append("  # Fin: ").append(displayName(end, "")).append('\n');
             for (int origin : origins) {
                 ProcessPath source = paths.get(origin);
@@ -105,7 +106,8 @@ public class GherkinGenerator {
             appendNodes(feature, humans);
         }
         feature.append("    Entonces se alcanzan estos eventos finales del proceso\n");
-        appendNodes(feature, path.getNodes().stream().filter(node -> node.getType() == NodeType.END_EVENT).toList());
+        appendNodes(feature, path.getNodes().stream().filter(node -> node.getType() == NodeType.END_EVENT)
+                .sorted(Comparator.comparing(BpmnNode::getId)).toList());
     }
 
     private void appendNodes(StringBuilder feature, List<BpmnNode> nodes) {
@@ -134,7 +136,7 @@ public class GherkinGenerator {
     }
 
     private List<String> eventIds(ProcessPath path, NodeType type) {
-        return path.getNodes().stream().filter(node -> node.getType() == type).map(BpmnNode::getId).toList();
+        return path.getNodes().stream().filter(node -> node.getType() == type).map(BpmnNode::getId).sorted().toList();
     }
 
     // IDs y ocurrencias, no solo nombres ni conjuntos: conserva resultados y repeticiones.

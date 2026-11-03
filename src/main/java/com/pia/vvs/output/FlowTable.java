@@ -4,6 +4,7 @@ import com.pia.vvs.analysis.ProcessPath;
 import com.pia.vvs.analysis.BranchFlow;
 import com.pia.vvs.model.BpmnNode;
 import com.pia.vvs.model.BpmnProcess;
+import com.pia.vvs.model.NodeType;
 import com.pia.vvs.model.SequenceFlow;
 
 import java.util.ArrayList;
@@ -75,7 +76,10 @@ public class FlowTable {
             for (BpmnNode node : path.getNodes()) {
                 visited.add(node.getId());
             }
-            String end = path.isComplete() ? path.getNodes().get(path.getNodes().size() - 1).getId() : "";
+            // IDs únicos y ordenados: el orden XML no define cuál es el final de un camino concurrente.
+            String end = path.isComplete() ? path.getNodes().stream()
+                    .filter(node -> node.getType() == NodeType.END_EVENT).map(BpmnNode::getId)
+                    .distinct().sorted().collect(Collectors.joining(";")) : "";
             String blocked = path.isComplete() ? "" : path.getBlockedFlow().getId();
             List<String> row = new ArrayList<>(List.of("F" + (i + 1), path.getStatus().name(),
                     Integer.toString(path.getReturnCount()), end, blocked));

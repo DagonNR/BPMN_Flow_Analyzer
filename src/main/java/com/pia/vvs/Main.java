@@ -104,17 +104,23 @@ public class Main {
             validateDestination(input, stepsFile);
             stepGenerator.validateExisting(stepsFile, javaSteps);
         }
-        Files.createDirectories(output);
-        if (javaSteps != null) {
-            stepGenerator.write(stepsFile, javaSteps);
-        }
-        new ExcelExporter().write(excelFile, graph.getProcess(), paths, branches);
-        writeResult(csvFile, csv);
-        if (branchCsv != null) {
-            writeResult(branchFile, branchCsv);
-        }
-        if (feature != null) {
-            writeResult(featureFile, feature);
+        try {
+            Files.createDirectories(output);
+            if (javaSteps != null) {
+                stepGenerator.write(stepsFile, javaSteps);
+            }
+            new ExcelExporter().write(excelFile, graph.getProcess(), paths, branches);
+            writeResult(csvFile, csv);
+            if (branchCsv != null) {
+                writeResult(branchFile, branchCsv);
+            }
+            if (feature != null) {
+                writeResult(featureFile, feature);
+            }
+        } catch (IOException | IllegalArgumentException exception) {
+            throw new IOException("La generación no terminó correctamente. Algunos archivos podrían haberse actualizado "
+                    + "y otros podrían conservar resultados anteriores. Corrija el problema y repita la generación. "
+                    + "Detalle: " + exception.getMessage(), exception);
         }
         System.out.println("\nAnálisis estructural: no se evalúan condiciones; COMPLETE no garantiza una ejecución viable.");
         System.out.println("\nTABLA DE FLUJOS\n" + table.toText(graph.getProcess(), paths));

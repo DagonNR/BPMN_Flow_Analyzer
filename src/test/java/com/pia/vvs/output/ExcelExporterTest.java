@@ -6,6 +6,7 @@ import com.pia.vvs.graph.ProcessGraph;
 import com.pia.vvs.model.BpmnNode;
 import com.pia.vvs.model.BpmnProcess;
 import com.pia.vvs.parser.BpmnParser;
+import io.cucumber.gherkin.GherkinParser;
 import org.apache.poi.ss.usermodel.CellType;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.ss.usermodel.Sheet;
@@ -27,6 +28,52 @@ import static org.junit.jupiter.api.Assertions.*;
 class ExcelExporterTest {
     @TempDir
     Path directory;
+
+    @ParameterizedTest
+    @CsvSource({"a,a", "a b,a;b", "b a,a;b"})
+    void preservesEveryEndAcrossCsvExcelAndGherkinRegardlessOfXmlOrder(String declarationOrder,
+                                                                      String expectedEnds) throws Exception {
+        // Mismo caso mínimo de la auditoría; una variante conserva un solo final.
+        StringBuilder nodes = new StringBuilder();
+        for (String id : declarationOrder.split(" ")) {
+            nodes.append("<endEvent id=\"").append(id).append("\"/>");
+        }
+        String flows = "<sequenceFlow id=\"fa\" sourceRef=\"g\" targetRef=\"a\"/>"
+                + (declarationOrder.contains("b") ? "<sequenceFlow id=\"fb\" sourceRef=\"g\" targetRef=\"b\"/>" : "");
+        Path input = Files.writeString(directory.resolve("ends.bpmn"), """
+                <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL">
+                  <process id="test">
+                    <startEvent id="s"/><parallelGateway id="g"/>%s
+                    <sequenceFlow id="f0" sourceRef="s" targetRef="g"/>%s
+                  </process>
+                </definitions>
+                """.formatted(nodes, flows));
+        var process = new BpmnParser().parse(input, "test");
+        var paths = new PathAnalyzer().analyze(new ProcessGraph(process), 2);
+        assertEquals(1, paths.size());
+        assertTrue(paths.get(0).isComplete());
+        String csv = new FlowTable().toCsv(process, paths);
+        assertEquals(expectedEnds, parseCsv(csv).get(1).get(3));
+
+        Path output = directory.resolve("ends.xlsx");
+        new ExcelExporter().write(output, process, paths, null);
+        try (var workbook = read(output)) {
+            assertSheet(workbook.getSheet("Caminos"), csv, 2, 5);
+            assertEquals(expectedEnds, workbook.getSheet("Caminos").getRow(1).getCell(3).getStringCellValue());
+        }
+        String feature = new GherkinGenerator().generate(process, paths);
+        assertTrue(feature.contains("  # Fin: " + expectedEnds + "\n"));
+        Path featureFile = Files.writeString(directory.resolve("ends.feature"), feature);
+        var envelopes = GherkinParser.builder().build().parse(featureFile).toList();
+        assertTrue(envelopes.stream().noneMatch(envelope -> envelope.getParseError().isPresent()));
+        var scenarios = envelopes.stream().flatMap(envelope -> envelope.getPickle().stream()).toList();
+        assertEquals(1, scenarios.size());
+        var result = scenarios.get(0).getSteps().stream()
+                .filter(step -> step.getText().equals("se alcanzan estos eventos finales del proceso"))
+                .findFirst().orElseThrow().getArgument().orElseThrow().getDataTable().orElseThrow();
+        assertEquals(List.of(expectedEnds.split(";")), result.getRows().stream().skip(1)
+                .map(row -> row.getCells().get(1).getValue()).toList());
+    }
 
     @ParameterizedTest
     @CsvSource({

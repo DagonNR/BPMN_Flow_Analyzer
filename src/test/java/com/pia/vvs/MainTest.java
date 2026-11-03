@@ -24,6 +24,28 @@ class MainTest {
     Path directory;
 
     @Test
+    void explainsPartialResultsWhenExcelFailsAfterWritingJava() throws Exception {
+        Path input = Files.writeString(directory.resolve("large.bpmn"), Files.readString(Path.of(APPLICATION))
+                .replace("name=\"Manual Review\"", "name=\"" + "A".repeat(33000) + "\""));
+        Path output = Files.createDirectory(directory.resolve("output"));
+        Path previousCsv = Files.writeString(output.resolve("ApplicationProcess.csv"), "resultado anterior");
+
+        Execution result = run(input.toString(), APPLICATION_ID, output.toString());
+
+        assertEquals(1, result.exitCode(), result.output());
+        assertTrue(result.output().contains("La generación no terminó correctamente"));
+        assertTrue(result.output().contains("Algunos archivos podrían haberse actualizado"));
+        assertTrue(result.output().contains("otros podrían conservar resultados anteriores"));
+        assertTrue(result.output().contains("Corrija el problema y repita la generación"));
+        assertTrue(result.output().contains("No se pudo exportar Excel"));
+        assertEquals("resultado anterior", Files.readString(previousCsv));
+        assertTrue(Files.isRegularFile(new CucumberStepGenerator().destination(output, "ApplicationProcess")));
+        assertFalse(Files.exists(output.resolve("ApplicationProcess.xlsx")));
+        assertFalse(Files.exists(output.resolve("ApplicationProcess.feature")));
+        assertFalse(result.output().contains("Archivos generados:"));
+    }
+
+    @Test
     void defaultInvocationGeneratesTheTableAndFeature() throws Exception {
         Execution result = run();
 

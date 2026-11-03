@@ -27,6 +27,15 @@ import java.util.Set;
 
 public class BpmnParser {
     private static final String BPMN_NAMESPACE = "http://www.omg.org/spec/BPMN/20100524/MODEL";
+    // Hijos de process que no definen nodos ni conexiones de control (Semantic.xsd).
+    // Se ignora su contenido; esto no es una validación completa del esquema BPMN.
+    private static final Set<String> IGNORED_PROCESS_ELEMENTS = Set.of(
+            "documentation", "extensionElements", "auditing", "monitoring", "property", "laneSet",
+            "dataObject", "dataObjectReference", "dataStoreReference", "association", "textAnnotation", "group",
+            "supportedInterfaceRef", "ioSpecification", "ioBinding", "resourceRole", "performer",
+            "humanPerformer", "potentialOwner", "correlationSubscription", "supports");
+    private static final Set<String> UNSUPPORTED_PROCESS_ELEMENTS = Set.of(
+            "adHocSubProcess", "transaction", "choreographyTask", "subChoreography", "callChoreography");
 
     public BpmnProcess parse(Path file, String processId) throws IOException {
         Objects.requireNonNull(file, "La ruta del archivo es obligatoria.");
@@ -52,7 +61,16 @@ public class BpmnParser {
             }
             NodeType type = NodeType.fromXmlName(element.getLocalName());
             if (type == null && !"sequenceFlow".equals(element.getLocalName())) {
-                continue;
+                if (IGNORED_PROCESS_ELEMENTS.contains(element.getLocalName())) {
+                    continue;
+                }
+                String detail = "<" + element.getTagName() + "> (id=" + element.getAttribute("id")
+                        + ") en el proceso '" + processId + "'. ";
+                if (UNSUPPORTED_PROCESS_ELEMENTS.contains(element.getLocalName())) {
+                    throw new IOException("Elemento BPMN no soportado: " + detail);
+                }
+                throw new IOException("Elemento BPMN desconocido en este contexto: " + detail
+                        + "Revise el nombre de la etiqueta y su ubicación dentro del proceso.");
             }
             String id = requiredAttribute(element, "id");
             if (!ids.add(id)) {

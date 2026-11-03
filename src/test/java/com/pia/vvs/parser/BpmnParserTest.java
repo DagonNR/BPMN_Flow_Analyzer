@@ -29,6 +29,75 @@ class BpmnParserTest {
     @TempDir
     Path tempDirectory;
 
+    @ParameterizedTest
+    @ValueSource(strings = {"", "b:"})
+    void diagnosesUnknownBpmnChildrenEvenWithoutASequenceFlowReference(String prefix) throws IOException {
+        Path file = writeXml("""
+                <definitions xmlns="%s" xmlns:b="%s">
+                  <process id="test"><%susreTask id="typo"/></process>
+                </definitions>
+                """.formatted(NAMESPACE, NAMESPACE, prefix));
+        IOException error = assertThrows(IOException.class, () -> parser.parse(file, "test"));
+        assertTrue(error.getMessage().contains("Elemento BPMN desconocido"));
+        assertTrue(error.getMessage().contains(prefix + "usreTask"));
+        assertTrue(error.getMessage().contains("typo"));
+        assertTrue(error.getMessage().contains("test"));
+        assertTrue(error.getMessage().contains("Revise el nombre"));
+    }
+
+    @Test
+    void ignoresLegitimateProcessMetadataAndDataWithoutAddingControlNodes() throws IOException {
+        Path file = writeXml("""
+                <definitions xmlns="%s">
+                  <process id="test">
+                    <documentation>Proceso de ejemplo</documentation>
+                    <supportedInterfaceRef>interface</supportedInterfaceRef><ioSpecification/><ioBinding/>
+                    <auditing/><monitoring/><property id="property"/>
+                    <laneSet id="lanes"><lane id="lane"><flowNodeRef>s</flowNodeRef></lane></laneSet>
+                    <dataObject id="data"/><dataObjectReference id="ref" dataObjectRef="data"/>
+                    <dataStoreReference id="store"/><textAnnotation id="note"><text>Nota</text></textAnnotation>
+                    <association id="assoc" sourceRef="note" targetRef="s"/><group id="group"/>
+                    <resourceRole/><performer/><humanPerformer/><potentialOwner/>
+                    <correlationSubscription/><supports>other</supports>
+                    <startEvent id="s"/><endEvent id="e"/>
+                    <sequenceFlow id="f" sourceRef="s" targetRef="e"/>
+                  </process>
+                </definitions>
+                """.formatted(NAMESPACE));
+        BpmnProcess process = parser.parse(file, "test");
+        assertEquals(java.util.Set.of("s", "e"), process.getNodes().keySet());
+        assertEquals(1, process.getSequenceFlows().size());
+        assertTrue(new PathAnalyzer().analyze(new ProcessGraph(process), 2).get(0).isComplete());
+    }
+
+    @Test
+    void leavesForeignElementsAndExtensionContentsOutsideTheControlGraph() throws IOException {
+        Path file = writeXml("""
+                <definitions xmlns="%s" xmlns:ext="urn:vendor">
+                  <process id="test">
+                    <extensionElements><ext:config/><usreTask id="extension-content"/></extensionElements>
+                    <ext:usreTask id="foreign"/><ext:sequenceFlow sourceRef="missing" targetRef="missing"/>
+                    <startEvent id="s"/><endEvent id="e"/>
+                    <sequenceFlow id="f" sourceRef="s" targetRef="e"/>
+                  </process>
+                </definitions>
+                """.formatted(NAMESPACE));
+        BpmnProcess process = parser.parse(file, "test");
+        assertEquals(java.util.Set.of("s", "e"), process.getNodes().keySet());
+        assertEquals(1, process.getSequenceFlows().size());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"transaction", "adHocSubProcess"})
+    void distinguishesKnownUnsupportedElementsFromMisspelledTags(String tag) throws IOException {
+        Path file = writeXml("<definitions xmlns=\"" + NAMESPACE
+                + "\"><process id=\"test\"><" + tag + " id=\"unsupported\"/></process></definitions>");
+        IOException error = assertThrows(IOException.class, () -> parser.parse(file, "test"));
+        assertTrue(error.getMessage().contains("Elemento BPMN no soportado"));
+        assertTrue(error.getMessage().contains(tag));
+        assertFalse(error.getMessage().contains("desconocido"));
+    }
+
     @Test
     void readsExpectedApplicationCounts() throws IOException {
         BpmnProcess process = parser.parse(APPLICATION, PROCESS_ID);

@@ -120,11 +120,18 @@ limitados con ajuste de texto. Los retornos son números; los textos del BPMN so
 celdas de texto, incluso cuando comienzan con `=`, `+`, `-` o `@`. Por eso el XLSX
 conserva el texto original sin el apóstrofo de seguridad que utiliza el CSV.
 Los nombres repetidos se distinguen por su ID.
+La columna `Evento final` y el comentario Gherkin `# Fin:` conservan todos los IDs
+finales alcanzados por un camino completo, sin duplicados, ordenados por ID y
+separados por `;`. Un solo final conserva su formato anterior. La tabla de finales
+del escenario también se ordena por ID; no indica un orden temporal de ejecución.
 
 El libro se escribe y cierra en un archivo temporal antes de reemplazar el destino.
 Si falla la exportación, se informa el error y se conserva el libro anterior, si
 existía. No se sobrescribe el BPMN de entrada. Los formatos se publican por archivo;
 no se garantiza una actualización conjunta de todos ellos si falla una escritura posterior.
+Ante un fallo durante la escritura, el mensaje advierte que puede haber archivos
+actualizados junto a resultados anteriores y pide corregir el problema y repetir
+la generación. La protección del Java modificado se comprueba antes de escribir.
 
 Se mantienen las limitaciones del analizador. El exportador trabaja en memoria y
 está destinado a modelos pequeños. Se aplican los límites de XLSX (1.048.576 filas,
@@ -457,6 +464,13 @@ la [documentación de Camunda](https://docs.camunda.org/manual/7.24/reference/bp
 El proyecto no reproduce su motor ni sus particularidades de implementación.
 
 ### Alcance y limitaciones
+
+El parser diagnostica etiquetas desconocidas entre los hijos directos del proceso
+seleccionado, indicando etiqueta, ID y proceso. Distingue elementos conocidos no
+soportados de metadatos legítimos (documentación, carriles, datos, asociaciones y
+recursos), que no forman parte del grafo de control. Conserva el tratamiento opaco
+de `extensionElements` y de elementos de otros namespaces. No valida el contenido
+de esos bloques ni sustituye una validación completa contra el esquema BPMN.
 
 Se comprueban ambos modelos incluidos y grafos pequeños con secuencias, XOR, AND,
 OR y combinaciones anidadas. El análisis requiere exactamente un inicio. Rechaza
