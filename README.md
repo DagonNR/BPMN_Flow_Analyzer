@@ -72,6 +72,37 @@ Por defecto, los resultados se guardan en `target/generated-tests/`.
 
 Los caminos completos y las vistas por ramas son representaciones diferentes: una rama no debe interpretarse como una ejecución independiente del proceso.
 
+### Vista opcional de tareas humanas por rama
+
+Para generar también los fragmentos humanos de la Figura 4 de De Moura,
+añade `--demoura` antes de los argumentos habituales. Desde la raíz, en Windows:
+
+```powershell
+java -cp "target/classes;target/dependency/*" com.pia.vvs.Main --demoura bpmn/HardwareRetailer.bpmn _6-1
+```
+
+Los resultados adicionales se escriben en `target/generated-tests/demoura/` (o en
+`demoura/` dentro de la salida elegida): `HardwareRetailer-demoura.feature` y
+`steps/com/pia/vvs/generated/hardwareretailer_demourasteps/HardwareRetailer_demouraSteps.java`.
+Usa ese paquete como glue de Cucumber para este archivo. La clase contiene pasos
+pendientes y se protege frente a cambios manuales igual que la clase original.
+
+Cada escenario conserva las tareas humanas en orden, incluidas sus repeticiones.
+Las variantes de una misma selección AND se agrupan cuando coinciden los IDs humanos,
+los finales del camino de origen, los flujos con condición explícita y las alternativas
+etiquetadas fuera de las bifurcaciones OR. Las etiquetas de estas bifurcaciones por
+sí solas no prueban un resultado distinto.
+Los comentarios identifican cada fila B, sus caminos F y sus flujos, etiquetas y condiciones.
+Los escenarios describen el modelo. Las actividades comunes posteriores a una convergencia
+siguen dependiendo de la sincronización de las ramas.
+
+En Hardware Retailer resultan tres fragmentos (transportista, correo, empaquetado)
+además de los cuatro escenarios conjuntos. En ApplicationProcess, `--demoura` con
+L=2 conserva siete resultados, incluido el rechazo inicial sin tareas humanas. Una
+proyección vacía de acciones se identifica expresamente y conserva sus eventos finales.
+Cuando falta la clasificación necesaria o la proyección AND no está soportada, la consola
+indica que los archivos de esta modalidad no se actualizaron.
+
 **Importante:** si se desea completar manualmente una clase Java generada, debe copiarse fuera de `target/`, ya que `mvn clean` elimina esa carpeta.
 
 ## Clasificación de tareas

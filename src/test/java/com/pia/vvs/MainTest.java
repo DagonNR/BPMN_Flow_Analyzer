@@ -24,6 +24,54 @@ class MainTest {
     Path directory;
 
     @Test
+    void optionalModeAddsSeparateFilesAndProtectsManuallyEditedBranchStepsBeforePublication() throws Exception {
+        String model = "HardwareRetailer";
+        String input = "bpmn/" + model + ".bpmn";
+        Path output = directory.resolve("resultados");
+        assertEquals(0, run(input, "_6-1", output.toString()).exitCode());
+        Path additional = output.resolve("demoura");
+        assertFalse(Files.exists(additional));
+        var generator = new CucumberStepGenerator();
+        var originals = List.of(output.resolve(model + ".csv"), output.resolve(model + "-ramas.csv"),
+                output.resolve(model + ".feature"), generator.destination(output, model));
+        List<String> before = new ArrayList<>();
+        for (Path file : originals) before.add(Files.readString(file));
+        Execution result = run("--demoura", input, "_6-1", output.toString());
+        assertEquals(0, result.exitCode(), result.output());
+        for (int i = 0; i < originals.size(); i++) assertEquals(before.get(i), Files.readString(originals.get(i)));
+        assertFeature(output.resolve(model + ".feature"), 4);
+        assertFeature(additional.resolve(model + "-demoura.feature"), 3);
+        assertEquals(6, Files.readAllLines(output.resolve(model + "-ramas.csv")).size());
+        Path java = generator.destination(additional, model + "-demoura");
+        assertTrue(Files.readString(java).contains("PendingException"));
+
+        Files.writeString(java, "// implementación manual");
+        Files.writeString(originals.get(0), "resultado anterior");
+        Execution stopped = run("--demoura", input, "_6-1", output.toString());
+        assertEquals(1, stopped.exitCode());
+        assertTrue(stopped.output().contains("Se conserva el Java existente"));
+        assertEquals("// implementación manual", Files.readString(java));
+        assertEquals("resultado anterior", Files.readString(originals.get(0)));
+    }
+
+    @Test
+    void reportsUnavailableProjectionWithoutPublishingAnAdditionalFeature() throws Exception {
+        Path input = Files.writeString(directory.resolve("separado.bpmn"), """
+                <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"><process id="p">
+                  <startEvent id="s"/><parallelGateway id="g"/><endEvent id="a"/><endEvent id="b"/>
+                  <sequenceFlow id="sg" sourceRef="s" targetRef="g"/>
+                  <sequenceFlow id="ga" sourceRef="g" targetRef="a"/><sequenceFlow id="gb" sourceRef="g" targetRef="b"/>
+                </process></definitions>
+                """);
+        Path output = directory.resolve("salida");
+        Execution result = run("--demoura", input.toString(), "p", output.toString());
+        assertEquals(0, result.exitCode(), result.output());
+        assertTrue(result.output().contains("Vista De Moura no disponible"));
+        assertTrue(Files.exists(output.resolve("separado.feature")));
+        assertFalse(Files.exists(output.resolve("demoura")));
+    }
+
+    @Test
     void explainsPartialResultsWhenExcelFailsAfterWritingJava() throws Exception {
         Path input = Files.writeString(directory.resolve("large.bpmn"), Files.readString(Path.of(APPLICATION))
                 .replace("name=\"Manual Review\"", "name=\"" + "A".repeat(33000) + "\""));
