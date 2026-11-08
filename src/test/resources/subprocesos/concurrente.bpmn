@@ -1,0 +1,18 @@
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" targetNamespace="urn:pruebas">
+  <process id="p">
+    <startEvent id="s"/>
+    <parallelGateway id="split"/>
+    <subProcess id="sub" name="Revisar expediente"><serviceTask id="interna"/></subProcess>
+    <parallelGateway id="join"/>
+    <userTask id="otra" name="Preparar envío"/>
+    <manualTask id="comun" name="Cerrar"/>
+    <endEvent id="e"/>
+    <sequenceFlow id="inicio" sourceRef="s" targetRef="split"/>
+    <sequenceFlow id="revision" sourceRef="split" targetRef="sub"/>
+    <sequenceFlow id="envio" sourceRef="split" targetRef="otra"/>
+    <sequenceFlow id="revisionLista" sourceRef="sub" targetRef="join"/>
+    <sequenceFlow id="envioListo" sourceRef="otra" targetRef="join"/>
+    <sequenceFlow id="cerrar" sourceRef="join" targetRef="comun"/>
+    <sequenceFlow id="fin" sourceRef="comun" targetRef="e"/>
+  </process>
+</definitions>

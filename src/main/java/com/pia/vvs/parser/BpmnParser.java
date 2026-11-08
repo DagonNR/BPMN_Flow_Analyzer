@@ -19,6 +19,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -36,6 +37,9 @@ public class BpmnParser {
             "humanPerformer", "potentialOwner", "correlationSubscription", "supports");
     private static final Set<String> UNSUPPORTED_PROCESS_ELEMENTS = Set.of(
             "adHocSubProcess", "transaction", "choreographyTask", "subChoreography", "callChoreography");
+    private static final Set<String> SPECIAL_SUBPROCESS_CONTENT = Set.of(
+            "transaction", "adHocSubProcess", "boundaryEvent", "callActivity", "loopCharacteristics",
+            "standardLoopCharacteristics", "multiInstanceLoopCharacteristics", "eventDefinition", "eventDefinitionRef");
 
     public BpmnProcess parse(Path file, String processId) throws IOException {
         Objects.requireNonNull(file, "La ruta del archivo es obligatoria.");
@@ -77,6 +81,10 @@ public class BpmnParser {
                 throw new IOException("ID BPMN duplicado en el proceso: " + id);
             }
             if (type != null) {
+                if (type == NodeType.SUB_PROCESS) validateOpaqueSubprocess(element);
+                if (type == NodeType.BOUNDARY_EVENT) {
+                    unsupportedBehaviors.add("boundaryEvent " + id + " adjunto a " + element.getAttribute("attachedToRef"));
+                }
                 readUnsupportedBehaviors(element, unsupportedBehaviors);
                 nodes.add(new BpmnNode(id, element.getAttribute("name"), type));
             } else {
@@ -105,6 +113,50 @@ public class BpmnParser {
                 behaviors.add(element.getLocalName() + " en " + node.getAttribute("id"));
             }
         }
+    }
+
+    // Inspección de marcadores BPMN: ningún nodo ni flujo interno se incorpora al grafo.
+    private void validateOpaqueSubprocess(Element subprocess) throws IOException {
+        ArrayDeque<Element> pending = new ArrayDeque<>();
+        pending.push(subprocess);
+        while (!pending.isEmpty()) {
+            Element element = pending.pop();
+            String tag = element.getLocalName();
+            String reason = null;
+            if (SPECIAL_SUBPROCESS_CONTENT.contains(tag) || tag.endsWith("EventDefinition")) {
+                reason = tag;
+            } else if (enabled(element, "triggeredByEvent")) {
+                reason = "triggeredByEvent";
+            } else if (enabled(element, "isForCompensation")) {
+                reason = "isForCompensation";
+            } else if (element == subprocess && (nonUnitQuantity(element, "startQuantity")
+                    || nonUnitQuantity(element, "completionQuantity"))) {
+                reason = "startQuantity/completionQuantity distintos de uno";
+            } else if (element.hasAttributeNS(XMLConstants.W3C_XML_SCHEMA_INSTANCE_NS_URI, "type")
+                    && (NodeType.fromXmlName(tag) != null || "flowElement".equals(tag))) {
+                reason = "xsi:type en " + tag;
+            }
+            if (reason != null) {
+                throw new IOException("Subproceso " + subprocess.getAttribute("id")
+                        + " no soportado como actividad opaca: " + reason + ".");
+            }
+            for (Node child = element.getFirstChild(); child != null; child = child.getNextSibling()) {
+                if (child instanceof Element nested && isBpmnElement(nested)
+                        && !IGNORED_PROCESS_ELEMENTS.contains(nested.getLocalName())) {
+                    pending.push(nested);
+                }
+            }
+        }
+    }
+
+    private boolean enabled(Element element, String attribute) {
+        if (!element.hasAttribute(attribute)) return false;
+        String value = element.getAttribute(attribute).strip();
+        return !"false".equals(value) && !"0".equals(value);
+    }
+
+    private boolean nonUnitQuantity(Element element, String attribute) {
+        return element.hasAttribute(attribute) && !element.getAttribute(attribute).strip().matches("[+]?0*1");
     }
 
     private Document readDocument(Path file) throws IOException {

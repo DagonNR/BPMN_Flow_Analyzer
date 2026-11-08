@@ -105,6 +105,16 @@ indica que los archivos de esta modalidad no se actualizaron.
 
 **Importante:** si se desea completar manualmente una clase Java generada, debe copiarse fuera de `target/`, ya que `mvn clean` elimina esa carpeta.
 
+## Subprocesos ordinarios
+
+Un `subProcess` ordinario con una entrada y una salida exteriores se representa
+como una sola actividad, suponiendo que termina normalmente. Su columna lleva el
+nombre y el ID exteriores. Las tareas internas quedan fuera del grafo y de los pasos humanos.
+Se rechazan eventos de borde, activación por eventos, transacciones, subprocesos ad hoc,
+bucles declarados, multiinstancia, compensación y eventos internos con definición especial.
+También se excluyen llamadas internas a procesos externos y tipos de nodo redefinidos con `xsi:type`.
+El subproceso exterior debe consumir y producir un solo token.
+
 ## Clasificación de tareas
 
 Las tareas BPMN de tipo `userTask` y `manualTask` se reconocen automáticamente. Para las tareas genéricas `task`, se puede colocar un archivo `<modelo>.tasks.properties` junto al BPMN, indicando sus IDs:

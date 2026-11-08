@@ -46,6 +46,11 @@ public enum NodeType {
         };
     }
 
+    /** Actividad que ocupa una columna en la tabla de flujos de De Moura. */
+    public boolean isStructuralActivity() {
+        return isTask() || this == SUB_PROCESS;
+    }
+
     public boolean isGateway() {
         return switch (this) {
             case EXCLUSIVE_GATEWAY, PARALLEL_GATEWAY, INCLUSIVE_GATEWAY,

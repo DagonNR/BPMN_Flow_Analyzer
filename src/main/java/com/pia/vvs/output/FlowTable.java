@@ -24,7 +24,7 @@ public class FlowTable {
     }
 
     List<List<String>> branchRows(BpmnProcess process, List<BranchFlow> branches) {
-        List<BpmnNode> tasks = process.getNodes().values().stream().filter(node -> node.getType().isTask()).toList();
+        List<BpmnNode> tasks = process.getNodes().values().stream().filter(node -> node.getType().isStructuralActivity()).toList();
         List<List<String>> rows = new ArrayList<>();
         List<String> header = new ArrayList<>(List.of("Flujo rama", "Representación", "Caminos origen", "Salidas AND elegidas"));
         for (BpmnNode task : tasks) {
@@ -63,7 +63,7 @@ public class FlowTable {
     }
 
     List<List<String>> rows(BpmnProcess process, List<ProcessPath> paths) {
-        List<BpmnNode> tasks = process.getNodes().values().stream().filter(node -> node.getType().isTask()).toList();
+        List<BpmnNode> tasks = process.getNodes().values().stream().filter(node -> node.getType().isStructuralActivity()).toList();
         List<List<String>> rows = new ArrayList<>();
         List<String> header = new ArrayList<>(List.of("Flujo", "Estado", "Retornos", "Evento final", "Flujo bloqueado"));
         for (BpmnNode task : tasks) {
