@@ -16,6 +16,7 @@ import com.pia.vvs.output.ExcelExporter;
 import com.pia.vvs.output.GherkinGenerator;
 import com.pia.vvs.output.TaskClassification;
 import com.pia.vvs.output.CucumberStepGenerator;
+import com.pia.vvs.output.DeMouraGherkinGenerator;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -23,11 +24,16 @@ import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.Collection;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 public class Main {
     public static void main(String[] args) {
         try {
+            if (args.length > 0 && args[0].equals("--demoura")) {
+                args = Arrays.copyOfRange(args, 1, args.length);
+            }
             validateArguments(args);
             Path file = args.length == 0 ? Path.of("bpmn", "ApplicationProcess.bpmn") : Path.of(args[0]);
             String processId = args.length == 0 ? "gov.medicaid.process.application" : args[1];
@@ -51,7 +57,7 @@ public class Main {
         if (args.length == 1 || args.length > 4) {
             throw new IllegalArgumentException("Uso: java -cp \"target/classes" + java.io.File.pathSeparator
                     + "target/dependency/*\" com.pia.vvs.Main "
-                    + "[archivo.bpmn procesoId [directorioSalida [maxRetornos]]]");
+                    + "[--demoura] [archivo.bpmn procesoId [directorioSalida [maxRetornos]]]");
         }
         for (String argument : args) {
             if (argument.isBlank()) {
@@ -89,33 +95,36 @@ public class Main {
         String baseName = application ? "ApplicationProcess" : inputBase;
         Path csvFile = output.resolve(baseName + ".csv");
         Path branchFile = output.resolve(baseName + "-ramas.csv");
-        Path featureFile = output.resolve(baseName + ".feature");
         Path excelFile = output.resolve(baseName + ".xlsx");
         CucumberStepGenerator stepGenerator = new CucumberStepGenerator();
-        Path stepsFile = stepGenerator.destination(output, baseName);
-        String javaSteps = feature == null ? null : stepGenerator.generate(feature, baseName);
+        List<FeatureFiles> features = new ArrayList<>();
         validateDestination(input, csvFile);
         validateDestination(input, excelFile);
         if (branchCsv != null) {
             validateDestination(input, branchFile);
         }
         if (feature != null) {
-            validateDestination(input, featureFile);
-            validateDestination(input, stepsFile);
-            stepGenerator.validateExisting(stepsFile, javaSteps);
+            features.add(prepareFeature(input, output, baseName, feature, stepGenerator));
+        }
+        if (branches != null && feature != null) {
+            String projection = new DeMouraGherkinGenerator().generate(graph, branches, classification);
+            features.add(prepareFeature(input, output.resolve("demoura"), baseName + "-demoura", projection, stepGenerator));
+        } else {
+            System.err.println("Vista De Moura no disponible: se requieren proyecciones por ramas y clasificación humana. "
+                    + "Cualquier .feature o Java previo de esa modalidad corresponde a otra ejecución.");
         }
         try {
             Files.createDirectories(output);
-            if (javaSteps != null) {
-                stepGenerator.write(stepsFile, javaSteps);
+            for (FeatureFiles files : features) {
+                stepGenerator.write(files.stepsFile(), files.javaSteps());
             }
             new ExcelExporter().write(excelFile, graph.getProcess(), paths, branches);
             writeResult(csvFile, csv);
             if (branchCsv != null) {
                 writeResult(branchFile, branchCsv);
             }
-            if (feature != null) {
-                writeResult(featureFile, feature);
+            for (FeatureFiles files : features) {
+                writeResult(files.featureFile(), files.feature());
             }
         } catch (IOException | IllegalArgumentException exception) {
             throw new IOException("La generación no terminó correctamente. Algunos archivos podrían haberse actualizado "
@@ -139,7 +148,23 @@ public class Main {
             System.out.println("Definiciones Java generadas con PendingException: requieren implementación funcional.");
         }
         System.out.println("Archivos generados:\n" + csvFile + (branchCsv != null ? "\n" + branchFile : "")
-                + "\n" + excelFile + (feature != null ? "\n" + featureFile + "\n" + stepsFile : ""));
+                + "\n" + excelFile);
+        for (FeatureFiles files : features) {
+            System.out.println(files.featureFile() + "\n" + files.stepsFile());
+        }
+    }
+
+    private record FeatureFiles(Path featureFile, String feature, Path stepsFile, String javaSteps) { }
+
+    private static FeatureFiles prepareFeature(Path input, Path directory, String name, String feature,
+                                              CucumberStepGenerator generator) throws IOException {
+        Path featureFile = directory.resolve(name + ".feature");
+        Path stepsFile = generator.destination(directory, name);
+        String javaSteps = generator.generate(feature, name);
+        validateDestination(input, featureFile);
+        validateDestination(input, stepsFile);
+        generator.validateExisting(stepsFile, javaSteps);
+        return new FeatureFiles(featureFile, feature, stepsFile, javaSteps);
     }
 
     private static void validateDestination(Path input, Path destination) throws IOException {

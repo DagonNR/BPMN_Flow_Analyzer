@@ -24,6 +24,60 @@ class MainTest {
     Path directory;
 
     @Test
+    void legacyAliasGeneratesTheSameFeaturesStepsAndCsvFilesAsTheDefault() throws Exception {
+        String model = "HardwareRetailer";
+        String input = "bpmn/" + model + ".bpmn";
+        Path output = directory.resolve("resultados");
+        assertEquals(0, run(input, "_6-1", output.toString()).exitCode());
+        Path legacy = directory.resolve("con-alias");
+        Execution result = run("--demoura", input, "_6-1", legacy.toString());
+        assertEquals(0, result.exitCode(), result.output());
+
+        var generator = new CucumberStepGenerator();
+        Path additional = output.resolve("demoura");
+        for (Path file : List.of(output.resolve(model + ".csv"), output.resolve(model + "-ramas.csv"),
+                output.resolve(model + ".feature"), generator.destination(output, model),
+                additional.resolve(model + "-demoura.feature"), generator.destination(additional, model + "-demoura"))) {
+            assertArrayEquals(Files.readAllBytes(file), Files.readAllBytes(legacy.resolve(output.relativize(file))));
+        }
+        assertTrue(Files.isRegularFile(legacy.resolve(model + ".xlsx")));
+    }
+
+    @Test
+    void protectsManuallyEditedBranchStepsBeforeDefaultPublication() throws Exception {
+        String input = "bpmn/HardwareRetailer.bpmn";
+        Path output = directory.resolve("resultados");
+        assertEquals(0, run(input, "_6-1", output.toString()).exitCode());
+        Path java = new CucumberStepGenerator().destination(output.resolve("demoura"), "HardwareRetailer-demoura");
+        assertTrue(Files.readString(java).contains("PendingException"));
+
+        Files.writeString(java, "// implementación manual");
+        Path csv = Files.writeString(output.resolve("HardwareRetailer.csv"), "resultado anterior");
+        Execution stopped = run(input, "_6-1", output.toString());
+        assertEquals(1, stopped.exitCode());
+        assertTrue(stopped.output().contains("Se conserva el Java existente"));
+        assertEquals("// implementación manual", Files.readString(java));
+        assertEquals("resultado anterior", Files.readString(csv));
+    }
+
+    @Test
+    void reportsUnavailableProjectionWithoutPublishingAnAdditionalFeature() throws Exception {
+        Path input = Files.writeString(directory.resolve("separado.bpmn"), """
+                <definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL"><process id="p">
+                  <startEvent id="s"/><parallelGateway id="g"/><endEvent id="a"/><endEvent id="b"/>
+                  <sequenceFlow id="sg" sourceRef="s" targetRef="g"/>
+                  <sequenceFlow id="ga" sourceRef="g" targetRef="a"/><sequenceFlow id="gb" sourceRef="g" targetRef="b"/>
+                </process></definitions>
+                """);
+        Path output = directory.resolve("salida");
+        Execution result = run(input.toString(), "p", output.toString());
+        assertEquals(0, result.exitCode(), result.output());
+        assertTrue(result.output().contains("Vista De Moura no disponible"));
+        assertTrue(Files.exists(output.resolve("separado.feature")));
+        assertFalse(Files.exists(output.resolve("demoura")));
+    }
+
+    @Test
     void explainsPartialResultsWhenExcelFailsAfterWritingJava() throws Exception {
         Path input = Files.writeString(directory.resolve("large.bpmn"), Files.readString(Path.of(APPLICATION))
                 .replace("name=\"Manual Review\"", "name=\"" + "A".repeat(33000) + "\""));
@@ -65,6 +119,9 @@ class MainTest {
         assertEquals(7, feature.lines().filter(line -> line.strip().startsWith("Escenario:")).count());
         Path java = new CucumberStepGenerator().destination(Path.of("target/generated-tests"), "ApplicationProcess");
         assertTrue(Files.readString(java).contains("public class ApplicationProcessSteps"));
+        Path additional = Path.of("target/generated-tests/demoura");
+        assertFeature(additional.resolve("ApplicationProcess-demoura.feature"), 7);
+        assertTrue(Files.isRegularFile(new CucumberStepGenerator().destination(additional, "ApplicationProcess-demoura")));
         assertTrue(result.output().contains("PendingException"));
     }
 
@@ -107,8 +164,9 @@ class MainTest {
         assertEquals(5, Files.readString(output.resolve("HardwareRetailer.csv")).lines().count());
         assertEquals(6, Files.readString(output.resolve("HardwareRetailer-ramas.csv")).lines().count());
         assertFeature(output.resolve("HardwareRetailer.feature"), 4);
+        assertFeature(output.resolve("demoura/HardwareRetailer-demoura.feature"), 3);
         try (var files = Files.list(output)) {
-            assertEquals(List.of("HardwareRetailer-ramas.csv", "HardwareRetailer.csv", "HardwareRetailer.feature", "HardwareRetailer.xlsx", "steps"),
+            assertEquals(List.of("HardwareRetailer-ramas.csv", "HardwareRetailer.csv", "HardwareRetailer.feature", "HardwareRetailer.xlsx", "demoura", "steps"),
                     files.map(path -> path.getFileName().toString()).sorted().toList());
         }
     }
@@ -128,6 +186,8 @@ class MainTest {
         assertEquals("resultado anterior", Files.readString(previous));
         assertEquals("implementación anterior", Files.readString(oldJava));
         assertTrue(result.output().contains("Tampoco se generará Java de pasos"));
+        assertTrue(result.output().contains("Vista De Moura no disponible"));
+        assertFalse(Files.exists(output.resolve("demoura")));
         assertFalse(result.output().substring(result.output().indexOf("Archivos generados:")).contains("Steps.java"));
         assertTrue(Files.isRegularFile(output.resolve("model.xlsx")));
         assertTrue(Files.isRegularFile(output.resolve("model-ramas.csv")));

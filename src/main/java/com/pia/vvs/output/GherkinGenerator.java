@@ -171,7 +171,7 @@ public class GherkinGenerator {
         };
     }
 
-    private String displayName(String value, String id) {
+    static String displayName(String value, String id) {
         String name = value.replaceAll("[\\p{javaWhitespace}\\p{Z}]+", " ").strip();
         return name.isEmpty() ? id : name;
     }

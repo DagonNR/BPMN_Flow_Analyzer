@@ -1,5 +1,6 @@
 package com.pia.vvs.output;
 
+import com.pia.vvs.analysis.BranchFlowProjector;
 import com.pia.vvs.analysis.PathAnalyzer;
 import com.pia.vvs.graph.ProcessGraph;
 import com.pia.vvs.parser.BpmnParser;
@@ -41,6 +42,17 @@ class CucumberStepGeneratorTest {
     @TempDir
     Path directory;
     private final CucumberStepGenerator generator = new CucumberStepGenerator();
+
+    @ParameterizedTest
+    @CsvSource({"ApplicationProcess,gov.medicaid.process.application,7", "HardwareRetailer,_6-1,3"})
+    void compilesAndBindsIndividualBranchSteps(String model, String id, int scenarios) throws Exception {
+        var process = new BpmnParser().parse(Path.of("bpmn", model + ".bpmn"), id);
+        var graph = new ProcessGraph(process);
+        var branches = new BranchFlowProjector().project(graph, new PathAnalyzer().analyze(graph, 2));
+        Path profile = Path.of("bpmn", model + ".tasks.properties");
+        var classification = Files.exists(profile) ? TaskClassification.load(process, profile) : TaskClassification.automatic(process);
+        verifyGeneratedCode(new DeMouraGherkinGenerator().generate(graph, branches, classification), model + "-demoura", scenarios);
+    }
 
     @ParameterizedTest
     @CsvSource({"ApplicationProcess,gov.medicaid.process.application,7", "HardwareRetailer,_6-1,4"})

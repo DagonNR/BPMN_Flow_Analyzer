@@ -219,7 +219,7 @@ public class PathAnalyzer {
             rules.validate(graph);
         }
         for (BpmnNode node : graph.getProcess().getNodes().values()) {
-            boolean supported = node.getType().isTask() || switch (node.getType()) {
+            boolean supported = node.getType().isStructuralActivity() || switch (node.getType()) {
                 case START_EVENT, END_EVENT, EXCLUSIVE_GATEWAY, PARALLEL_GATEWAY, INCLUSIVE_GATEWAY -> true;
                 default -> false;
             };
@@ -227,6 +227,11 @@ public class PathAnalyzer {
                 throw new IllegalArgumentException("Tipo de nodo no soportado para caminos: " + node.getId());
             }
             List<SequenceFlow> outgoing = graph.getOutgoingFlows(node.getId());
+            if (node.getType() == NodeType.SUB_PROCESS
+                    && (graph.getIncomingFlows(node.getId()).size() != 1 || outgoing.size() != 1)) {
+                throw new IllegalArgumentException("El subproceso " + node.getId()
+                        + " requiere una entrada y una salida exteriores.");
+            }
             if (node.getType() == NodeType.INCLUSIVE_GATEWAY
                     && graph.getIncomingFlows(node.getId()).size() > 1
                     && outgoing.stream().anyMatch(flow -> canReach(graph, flow.getTargetRef(), node.getId(), null))) {

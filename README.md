@@ -4,7 +4,7 @@ Proyecto desarrollado para la materia de **Verificación y Validación de Softwa
 
 ## Objetivo
 
-Analizar modelos BPMN para identificar caminos y generar archivos que sirvan como base para casos de prueba, tomando como referencia el procedimiento de **De Moura et al. (2017)**.
+Analizar modelos BPMN, identificar sus caminos y generar archivos que sirvan como base para casos de prueba, tomando como referencia el procedimiento de **De Moura et al. (2017)**.
 
 ## Requisitos
 
@@ -15,18 +15,19 @@ No es necesario tener Microsoft Excel instalado.
 
 ## Modelos incluidos
 
-En la carpeta `bpmn/` se incluyen dos modelos:
-
 - **ApplicationProcess.bpmn:** proceso de evaluación de solicitudes de inscripción de proveedores de servicios de salud.
 - **HardwareRetailer.bpmn:** proceso utilizado como referencia en el artículo de De Moura.
 
+Ambos se encuentran en la carpeta `bpmn/`.
+
 ## Funcionalidades
 
-- Lectura de modelos BPMN y construcción de su grafo de tareas y conexiones.
+- Lectura de modelos BPMN y construcción de su grafo.
 - Análisis de caminos con compuertas XOR, OR y AND, concurrencia y límite de retornos.
 - Generación de tablas de caminos y ramas en CSV y Excel.
-- Identificación de tareas humanas y generación de escenarios Gherkin (`.feature`).
-- Generación de clases Java iniciales con definiciones de pasos para Cucumber.
+- Generación de escenarios Gherkin estructurales y fragmentos de tareas humanas por rama.
+- Generación de clases Java iniciales para Cucumber.
+- Soporte de subprocesos ordinarios como una sola actividad.
 
 ## Instalación y ejecución
 
@@ -36,47 +37,53 @@ Desde la carpeta principal del proyecto, compilar con:
 mvn package
 ```
 
-**Ejecutar el modelo predeterminado (ApplicationProcess):**
+**Ejecutar ApplicationProcess (predeterminado):**
 
-```bash
+```powershell
 java -cp "target/classes;target/dependency/*" com.pia.vvs.Main
 ```
 
 **Ejecutar Hardware Retailer:**
 
-```bash
+```powershell
 java -cp "target/classes;target/dependency/*" com.pia.vvs.Main "bpmn/HardwareRetailer.bpmn" "_6-1"
 ```
 
-**Ejecutar otro modelo e indicar opciones:**
+**Ejecutar otro modelo con opciones:**
 
-```bash
+```powershell
 java -cp "target/classes;target/dependency/*" com.pia.vvs.Main "archivo.bpmn" "idProceso" "carpetaSalida" 2
 ```
 
-Los dos primeros argumentos indican el archivo BPMN y el ID del proceso. La carpeta de salida y el número máximo de retornos son opcionales. El límite predeterminado es **2** (se permiten valores de 0 a 100).
+Los dos primeros argumentos indican el archivo y el ID del proceso. La carpeta de salida y el límite de retornos son opcionales. El límite predeterminado es **2** (rango permitido: 0 a 100).
 
-En Windows se usa `;` para separar las rutas del classpath; en Linux y macOS debe cambiarse por `:`.
+La generación de De Moura se realiza automáticamente. El argumento anterior `--demoura` sigue siendo compatible, pero ya no es necesario.
+
+En Linux y macOS, sustituir `;` por `:` en el classpath.
 
 ## Archivos generados
 
-Por defecto, los resultados se guardan en `target/generated-tests/`.
+Los resultados se guardan por defecto en `target/generated-tests/`.
 
 | Archivo | Contenido |
 |---|---|
-| `<modelo>.csv` | Caminos identificados, incluidos los truncados. |
-| `<modelo>-ramas.csv` | Vista de las ramas de los caminos completos. |
-| `<modelo>.xlsx` | Excel con las hojas **Caminos** y **Ramas**. |
-| `<modelo>.feature` | Escenarios generados en Gherkin. |
-| `<Modelo>Steps.java` | Definiciones iniciales de pasos para Cucumber, dentro de `steps/`. |
+| `<modelo>.csv` | Caminos completos y truncados. |
+| `<modelo>-ramas.csv` | Ramas de los caminos completos. |
+| `<modelo>.xlsx` | Excel con hojas **Caminos** y **Ramas**. |
+| `<modelo>.feature` | Escenarios estructurales Gherkin. |
+| `steps/` | Definiciones Java originales de Cucumber. |
+| `demoura/<modelo>-demoura.feature` | Fragmentos de tareas humanas por rama. |
+| `demoura/steps/` | Definiciones Java adicionales para Cucumber. |
 
-Los caminos completos y las vistas por ramas son representaciones diferentes: una rama no debe interpretarse como una ejecución independiente del proceso.
+En Hardware Retailer se generan **4 escenarios estructurales y 3 fragmentos humanos**, correspondientes a las representaciones utilizadas en el artículo.
 
-**Importante:** si se desea completar manualmente una clase Java generada, debe copiarse fuera de `target/`, ya que `mvn clean` elimina esa carpeta.
+Las ramas no representan necesariamente ejecuciones independientes.
 
 ## Clasificación de tareas
 
-Las tareas BPMN de tipo `userTask` y `manualTask` se reconocen automáticamente. Para las tareas genéricas `task`, se puede colocar un archivo `<modelo>.tasks.properties` junto al BPMN, indicando sus IDs:
+Las tareas `userTask` y `manualTask` se reconocen automáticamente. Las tareas genéricas pueden clasificarse mediante un archivo `<modelo>.tasks.properties` junto al BPMN.
+
+Ejemplo:
 
 ```properties
 processId=_6-1
@@ -84,6 +91,12 @@ _6-102=human
 _6-226=excluded
 ```
 
-`human` selecciona una tarea como acción humana; `excluded` la deja fuera de esa selección. El modelo Hardware Retailer incluye su archivo de configuración completo.
+Hardware Retailer incluye su archivo de clasificación. Si faltan clasificaciones necesarias, el programa conserva las salidas válidas e informa qué archivos Gherkin o Java no pudo generar.
 
-Si faltan clasificaciones necesarias, el programa puede generar las tablas, pero no generará nuevos archivos Gherkin ni Java para ese modelo.
+## Limitaciones
+
+- El análisis es estructural: no ejecuta condiciones de negocio ni pruebas web.
+- Los subprocesos ordinarios se representan como una actividad, sin analizar su interior. Se rechazan variantes especiales y estructuras no soportadas, incluidas ciertas declaraciones `xsi:type`.
+- Las clases Java generadas contienen pasos pendientes de implementación.
+
+**Importante:** si se modifican manualmente las clases Java generadas, deben copiarse fuera de `target/`, porque `mvn clean` elimina esa carpeta.

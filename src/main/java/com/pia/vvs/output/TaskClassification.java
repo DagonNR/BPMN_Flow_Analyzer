@@ -25,6 +25,9 @@ public class TaskClassification {
             }
             BpmnNode node = process.getNodes().get(id);
             String value = overrides.getProperty(id).strip();
+            if (node != null && node.getType() == NodeType.SUB_PROCESS) {
+                throw new IllegalArgumentException("El subproceso opaco " + id + " no admite clasificación de tareas.");
+            }
             if (node == null || !node.getType().isTask()) {
                 throw new IllegalArgumentException("La clasificación contiene un ID de tarea inexistente: " + id);
             }

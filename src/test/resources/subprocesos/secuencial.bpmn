@@ -1,0 +1,24 @@
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" targetNamespace="urn:pruebas">
+  <process id="p">
+    <startEvent id="s"/>
+    <userTask id="a" name="Preparar"/>
+    <subProcess id="sub" name="Revisar expediente" triggeredByEvent="false">
+      <startEvent id="internoInicio"/>
+      <userTask id="interna" name="Entrevista interna"/>
+      <exclusiveGateway id="decisionInterna"/>
+      <serviceTask id="servicioInterno"/>
+      <endEvent id="internoFin"/>
+      <sequenceFlow id="i1" sourceRef="internoInicio" targetRef="interna"/>
+      <sequenceFlow id="i2" sourceRef="interna" targetRef="decisionInterna"/>
+      <sequenceFlow id="i3" sourceRef="decisionInterna" targetRef="servicioInterno"/>
+      <sequenceFlow id="i4" sourceRef="decisionInterna" targetRef="internoFin"/>
+      <sequenceFlow id="i5" sourceRef="servicioInterno" targetRef="internoFin"/>
+    </subProcess>
+    <manualTask id="c" name="Archivar"/>
+    <endEvent id="e"/>
+    <sequenceFlow id="f1" sourceRef="s" targetRef="a"/>
+    <sequenceFlow id="f2" sourceRef="a" targetRef="sub"/>
+    <sequenceFlow id="f3" sourceRef="sub" targetRef="c"/>
+    <sequenceFlow id="f4" sourceRef="c" targetRef="e"/>
+  </process>
+</definitions>

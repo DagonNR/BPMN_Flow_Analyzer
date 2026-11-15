@@ -1,0 +1,14 @@
+<definitions xmlns="http://www.omg.org/spec/BPMN/20100524/MODEL" targetNamespace="urn:pruebas">
+  <process id="p">
+    <startEvent id="s"/>
+    <exclusiveGateway id="decision"/>
+    <subProcess id="sub" name="Revisar expediente"><manualTask id="interna"/></subProcess>
+    <exclusiveGateway id="union"/>
+    <endEvent id="e"/>
+    <sequenceFlow id="inicio" sourceRef="s" targetRef="decision"/>
+    <sequenceFlow id="revisar" sourceRef="decision" targetRef="sub"/>
+    <sequenceFlow id="omitir" sourceRef="decision" targetRef="union"/>
+    <sequenceFlow id="reunir" sourceRef="sub" targetRef="union"/>
+    <sequenceFlow id="fin" sourceRef="union" targetRef="e"/>
+  </process>
+</definitions>
