@@ -31,8 +31,9 @@ import java.util.List;
 public class Main {
     public static void main(String[] args) {
         try {
-            boolean deMoura = args.length > 0 && args[0].equals("--demoura");
-            if (deMoura) args = Arrays.copyOfRange(args, 1, args.length);
+            if (args.length > 0 && args[0].equals("--demoura")) {
+                args = Arrays.copyOfRange(args, 1, args.length);
+            }
             validateArguments(args);
             Path file = args.length == 0 ? Path.of("bpmn", "ApplicationProcess.bpmn") : Path.of(args[0]);
             String processId = args.length == 0 ? "gov.medicaid.process.application" : args[1];
@@ -45,7 +46,7 @@ public class Main {
             printResults(file, process);
             printGraph(graph);
             Path output = args.length >= 3 ? Path.of(args[2]) : Path.of("target", "generated-tests");
-            generateResults(file, output, graph, maxReturns, deMoura);
+            generateResults(file, output, graph, maxReturns);
         } catch (IOException | IllegalArgumentException exception) {
             System.err.println("No se pudo analizar el BPMN: " + exception.getMessage());
             System.exit(1);
@@ -65,7 +66,7 @@ public class Main {
         }
     }
 
-    private static void generateResults(Path input, Path output, ProcessGraph graph, int maxReturns, boolean deMoura) throws IOException {
+    private static void generateResults(Path input, Path output, ProcessGraph graph, int maxReturns) throws IOException {
         String inputBase = input.getFileName().toString().replaceFirst("\\.[^.]*$", "");
         Path classificationFile = input.resolveSibling(inputBase + ".tasks.properties");
         TaskClassification classification = Files.exists(classificationFile)
@@ -105,14 +106,12 @@ public class Main {
         if (feature != null) {
             features.add(prepareFeature(input, output, baseName, feature, stepGenerator));
         }
-        if (deMoura) {
-            if (branches != null && feature != null) {
-                String projection = new DeMouraGherkinGenerator().generate(graph, branches, classification);
-                features.add(prepareFeature(input, output.resolve("demoura"), baseName + "-demoura", projection, stepGenerator));
-            } else {
-                System.err.println("Vista De Moura no disponible: se requieren proyecciones por ramas y clasificación humana. "
-                        + "Cualquier .feature o Java previo de esa modalidad corresponde a otra ejecución.");
-            }
+        if (branches != null && feature != null) {
+            String projection = new DeMouraGherkinGenerator().generate(graph, branches, classification);
+            features.add(prepareFeature(input, output.resolve("demoura"), baseName + "-demoura", projection, stepGenerator));
+        } else {
+            System.err.println("Vista De Moura no disponible: se requieren proyecciones por ramas y clasificación humana. "
+                    + "Cualquier .feature o Java previo de esa modalidad corresponde a otra ejecución.");
         }
         try {
             Files.createDirectories(output);
